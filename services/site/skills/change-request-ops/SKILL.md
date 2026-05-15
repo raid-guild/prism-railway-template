@@ -65,6 +65,8 @@ Create request pattern:
 4. Confirm the new request number, title, target app, and initial status back to the user.
 5. By default, workflow-backed requests auto-start when their entry step is an agent step. Send `"autoStart": false` only when the user explicitly wants to create a request without running it.
 6. If the entry step is a gate, the request waits for an operator decision.
+7. The create response returns the created row as `request`; read `changeRequest` only as a compatibility fallback.
+8. Valid `requestType` values are `bug`, `feature`, `issue`, `content`, `design`, `config`, and `ops`.
 
 List target apps:
 
@@ -88,7 +90,6 @@ curl -fsSL \
     "requestType": "'"$REQUEST_TYPE"'",
     "targetAppId": "'"$TARGET_APP_ID"'",
     "priority": "'"${PRIORITY:-normal}"'",
-    "status": "submitted",
     "source": "chat",
     "autoStart": true
   }'

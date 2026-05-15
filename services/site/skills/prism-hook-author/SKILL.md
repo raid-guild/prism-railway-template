@@ -22,6 +22,8 @@ Hook authoring rules:
 9. Use `targetAppId` only when the workflow actually requires a target repo/app. Many hooks can create content, notifications, or artifacts without a target.
 10. If a payload references an outside system, include stable identifiers and URLs in the payload so workflow steps can attach external refs.
 
+Hook request templates must use one of these `requestType` values: `bug`, `feature`, `issue`, `content`, `design`, `config`, or `ops`. Use `issue` when the hook represents an imported issue-like source item rather than a broader feature or content request.
+
 Recommended hook shape:
 
 ```json

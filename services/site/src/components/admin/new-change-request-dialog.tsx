@@ -176,6 +176,7 @@ export function NewChangeRequestDialog({
               >
                 <option value="bug">Bug</option>
                 <option value="feature">Feature</option>
+                <option value="issue">Issue</option>
                 <option value="content">Content</option>
                 <option value="design">Design</option>
                 <option value="config">Config</option>

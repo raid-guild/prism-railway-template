@@ -21,6 +21,8 @@ Task authoring rules:
 12. If a requested destination cannot be resolved, create the task disabled and state that delivery is unresolved.
 13. When a task creates a request from an outside system, attach that source as a request external ref when the API is available. Examples: GitHub issue collector tasks attach the source issue, Discord support triage tasks attach the source message or thread, and publishing tasks attach the final CMS post.
 
+Workflow-runner request types must use one of: `bug`, `feature`, `issue`, `content`, `design`, `config`, or `ops`. Use `issue` for imported GitHub issues or issue-like support intake when the source item itself is the request.
+
 Recommended task row shape:
 
 ```json

@@ -627,7 +627,7 @@ function buildCodexPromptTask(siteTask: AppTask): RunnableTask | null {
 }
 
 function statusFromChangeRequest(payload: Record<string, unknown>): string | null {
-  const changeRequest = payload.changeRequest;
+  const changeRequest = changeRequestFromPayload(payload);
   if (!isRecord(changeRequest)) {
     return null;
   }
@@ -636,7 +636,7 @@ function statusFromChangeRequest(payload: Record<string, unknown>): string | nul
 }
 
 function requestIdFromChangeRequest(payload: Record<string, unknown>): string | null {
-  const changeRequest = payload.changeRequest;
+  const changeRequest = changeRequestFromPayload(payload);
   if (!isRecord(changeRequest)) {
     return null;
   }
@@ -645,7 +645,7 @@ function requestIdFromChangeRequest(payload: Record<string, unknown>): string | 
 }
 
 function requestNumberFromChangeRequest(payload: Record<string, unknown>): number | null {
-  const changeRequest = payload.changeRequest;
+  const changeRequest = changeRequestFromPayload(payload);
   if (!isRecord(changeRequest)) {
     return null;
   }
@@ -654,6 +654,9 @@ function requestNumberFromChangeRequest(payload: Record<string, unknown>): numbe
 }
 
 function changeRequestFromPayload(payload: Record<string, unknown>): Record<string, unknown> | null {
+  if (isRecord(payload.request)) {
+    return payload.request;
+  }
   return isRecord(payload.changeRequest) ? payload.changeRequest : null;
 }
 

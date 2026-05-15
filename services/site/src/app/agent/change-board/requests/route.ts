@@ -52,10 +52,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: `Workflow ${workflowKey} requires targetAppId` }, { status: 400 })
   }
   if (!trackedChangeRequestTypes.includes(requestType as typeof trackedChangeRequestTypes[number])) {
-    return NextResponse.json({ ok: false, error: "Invalid request type" }, { status: 400 })
+    return NextResponse.json({
+      ok: false,
+      error: "Invalid request type",
+      validRequestTypes: trackedChangeRequestTypes,
+    }, { status: 400 })
   }
   if (!trackedChangeRequestPriorities.includes(priority as typeof trackedChangeRequestPriorities[number])) {
-    return NextResponse.json({ ok: false, error: "Invalid priority" }, { status: 400 })
+    return NextResponse.json({
+      ok: false,
+      error: "Invalid priority",
+      validPriorities: trackedChangeRequestPriorities,
+    }, { status: 400 })
   }
 
   const changeRequest = createChangeRequest({
@@ -91,10 +99,12 @@ export async function POST(request: Request) {
     ? await autoStartWorkflowRequest(changeRequest, { baseUrl: origin, requestedSkills })
     : null
   const refreshedChangeRequest = changeRequest ? getChangeRequest(changeRequest.id) : null
+  const createdRequest = refreshedChangeRequest ?? changeRequest
 
   return NextResponse.json({
     ok: true,
-    changeRequest: refreshedChangeRequest ?? changeRequest,
+    request: createdRequest,
+    changeRequest: createdRequest,
     autoStart,
   }, { status: 201 })
 }
