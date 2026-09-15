@@ -100,6 +100,49 @@ def append_ingest_record(record: dict) -> None:
         handle.write(json.dumps(record, ensure_ascii=True) + "\n")
 
 
+def active_space_config() -> dict:
+    config_path = runtime_space_root() / "config" / "space.json"
+    if not config_path.is_file():
+        return {}
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def discord_category_to_bucket() -> dict[str, str]:
+    config = active_space_config()
+    discord = config.get("discord") if isinstance(config.get("discord"), dict) else {}
+    mapping = discord.get("category_to_bucket") if isinstance(discord.get("category_to_bucket"), dict) else {}
+    return {str(key).strip(): str(value).strip() for key, value in mapping.items() if str(key).strip() and str(value).strip()}
+
+
+def resolve_discord_bucket_hint(candidate: dict, metadata: dict, mapping: dict[str, str]) -> str | None:
+    explicit = metadata.get("bucketHint") or metadata.get("bucket") or candidate.get("bucketHint") or candidate.get("bucket")
+    if explicit:
+        return str(explicit).strip() or None
+    candidates = [
+        metadata.get("parentCategoryId"),
+        metadata.get("parent_category_id"),
+        candidate.get("parentCategoryId"),
+        candidate.get("parent_category_id"),
+        metadata.get("parentChannelId"),
+        metadata.get("parent_channel_id"),
+        candidate.get("parentChannelId"),
+        candidate.get("parent_channel_id"),
+        metadata.get("channelId"),
+        metadata.get("channel_id"),
+        candidate.get("channelId"),
+        candidate.get("channel_id"),
+    ]
+    for raw in candidates:
+        key = str(raw or "").strip()
+        if key and key in mapping:
+            return mapping[key]
+    return None
+
+
 def starter_settings() -> Settings:
     api_key = os.environ.get("PRISM_API_KEY", "").strip() or None
     read_key = os.environ.get("PRISM_API_READ_KEY", "").strip() or api_key
@@ -134,6 +177,7 @@ def ingest_messages(payload: dict, x_prism_api_key: str | None = Header(default=
 
     space = str(payload.get("space") or settings.space).strip() or settings.space
     source = str(payload.get("source") or "unknown").strip() or "unknown"
+    source_event_type = f"{source.lower().replace('-', '_').replace(' ', '_')}_message"
     batch_id = str(payload.get("batchId") or payload.get("batch_id") or "").strip() or None
     messages = payload.get("messages")
 
@@ -143,6 +187,7 @@ def ingest_messages(payload: dict, x_prism_api_key: str | None = Header(default=
     accepted = 0
     inbox_paths: list[str] = []
     normalized_messages = []
+    bucket_mapping = discord_category_to_bucket() if source.lower() == "discord" else {}
 
     for index, candidate in enumerate(messages):
         if not isinstance(candidate, dict):
@@ -185,7 +230,7 @@ def ingest_messages(payload: dict, x_prism_api_key: str | None = Header(default=
         inbox_payload = {
             "source": str(candidate.get("source") or source).strip() or source,
             "ts": timestamp,
-            "type": "discord_message",
+            "type": source_event_type,
             "content": text or "(empty message)",
             "author": display_name,
             "url": metadata.get("messageUrl"),
@@ -199,10 +244,9 @@ def ingest_messages(payload: dict, x_prism_api_key: str | None = Header(default=
                 "authorBot": bool(author.get("bot")),
             },
         }
-        if metadata.get("bucketHint"):
-            inbox_payload["bucket_hint"] = metadata["bucketHint"]
-        elif metadata.get("bucket"):
-            inbox_payload["bucket_hint"] = metadata["bucket"]
+        bucket_hint = resolve_discord_bucket_hint(candidate, metadata, bucket_mapping)
+        if bucket_hint:
+            inbox_payload["bucket_hint"] = bucket_hint
 
         inbox_path = storage.write_memory_inbox_entry(inbox_payload)
         inbox_paths.append(inbox_path)

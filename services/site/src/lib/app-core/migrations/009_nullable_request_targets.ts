@@ -54,11 +54,7 @@ const defaultChangeRequestWorkflow = {
       label: "Review",
       type: "gate",
       instructionPath: "workflows/change-request-default/steps/review.md",
-      routes: {
-        approved: "closed",
-        changesRequested: "implement",
-        rejected: "closed",
-      },
+      next: "closed",
     },
     {
       key: "closed",

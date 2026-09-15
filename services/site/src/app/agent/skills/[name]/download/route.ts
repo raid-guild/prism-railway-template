@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { buildHostedSkillArchive, loadConfig } from "@/lib/app-core"
+import { buildHostedSkillArchive, listHostedSkillSourceRoots, loadConfig } from "@/lib/app-core"
 
 import { requireServiceAccess } from "@/lib/internal-service"
 import { readRouteParam } from "@/lib/local-admin-api"
@@ -17,7 +17,7 @@ export async function GET(_request: Request, context: RouteContext) {
   const { name } = await context.params
   const config = loadConfig()
   const skillName = readRouteParam(name)
-  const archive = buildHostedSkillArchive(config.repoRoot, skillName, config.customSkillsRoot)
+  const archive = buildHostedSkillArchive(config.repoRoot, skillName, config.customSkillsRoot, listHostedSkillSourceRoots())
 
   if (!archive) {
     return NextResponse.json({ ok: false, error: "Hosted skill not found" }, { status: 404 })

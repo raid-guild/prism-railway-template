@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server"
 import { createTaskRun, listTaskRuns } from "@/lib/app-core"
-import { parseString, readOptionalInteger, requireServiceAccess } from "@/lib/internal-service"
+import {
+  parseString,
+  readOptionalInteger,
+  requireServiceAccess,
+  requireTaskRunnerMutationAccess,
+} from "@/lib/internal-service"
 
 function parseConfig(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -26,7 +31,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const access = await requireServiceAccess()
+  const access = await requireTaskRunnerMutationAccess()
   if (!access.ok) {
     return NextResponse.json({ ok: false, error: access.error }, { status: access.status })
   }

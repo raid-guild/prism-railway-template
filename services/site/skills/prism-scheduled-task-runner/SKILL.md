@@ -27,10 +27,15 @@ Useful environment variables may include:
 - `PRISM_AGENT_SERVICE_TOKEN`
 - `APP_API_BASE_URL`
 - `APP_API_SERVICE_TOKEN`
-- `OUTPUT_ADAPTER_BASE_URL`
-- `OUTPUT_ADAPTER_TOKEN`
+- `PORTAL_TASK_SECRET`
+- `COMMUNICATION_ADAPTER_BASE_URL`
+- `COMMUNICATION_ADAPTER_TOKEN`
 
 In deployed Prism instances, Codex Runtime usually receives `APP_API_BASE_URL` and `APP_API_SERVICE_TOKEN`, then exposes them to Codex as `PRISM_AGENT_API_BASE_URL` and `PRISM_AGENT_SERVICE_TOKEN`. If the `PRISM_*` names are missing, check the `APP_*` names before concluding the site API is unavailable.
+
+Portal email queue dispatch should use a deterministic `http-post` task with
+key `portal-notification-email-dispatch`. Do not create a recurring
+`codex-prompt` task for five-minute email dispatch.
 
 If the stored task has `metadata.outputConfig.outputDestinations`, do not call the adapter directly. Return the final message body and let task-runner deliver it.
 
@@ -38,8 +43,8 @@ If the prompt explicitly asks you to send a one-off message through Discord now,
 
 ```bash
 curl -fsSL \
-  -H "X-Adapter-Token: $OUTPUT_ADAPTER_TOKEN" \
-  "$OUTPUT_ADAPTER_BASE_URL/destinations"
+  -H "X-Adapter-Token: $COMMUNICATION_ADAPTER_TOKEN" \
+  "$COMMUNICATION_ADAPTER_BASE_URL/destinations"
 ```
 
 Then send to the resolved destination id:
@@ -48,12 +53,12 @@ Then send to the resolved destination id:
 curl -fsSL \
   -X POST \
   -H "content-type: application/json" \
-  -H "X-Adapter-Token: $OUTPUT_ADAPTER_TOKEN" \
-  "$OUTPUT_ADAPTER_BASE_URL/messages" \
+  -H "X-Adapter-Token: $COMMUNICATION_ADAPTER_TOKEN" \
+  "$COMMUNICATION_ADAPTER_BASE_URL/messages" \
   -d '{"destinationId":"<channel-id>","content":"Test message"}'
 ```
 
-If `OUTPUT_ADAPTER_TOKEN` is missing, report that direct adapter delivery is not wired into Codex Runtime. Do not use `APP_API_SERVICE_TOKEN` or `PRISM_AGENT_SERVICE_TOKEN` against adapter `/messages`.
+If `COMMUNICATION_ADAPTER_TOKEN` is missing, report that direct adapter delivery is not wired into Codex Runtime. Do not use `APP_API_SERVICE_TOKEN` or `PRISM_AGENT_SERVICE_TOKEN` against adapter `/messages`.
 
 For Prism Memory reads, use:
 

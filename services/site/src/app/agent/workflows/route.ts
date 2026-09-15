@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 
-import { listWorkflows, loadConfig, upsertWorkflow } from "@/lib/app-core";
+import { assignAccountabilityDomain, getAccountabilityAssignment, listWorkflows, loadConfig, upsertWorkflow } from "@/lib/app-core";
 import { requireServiceAccess } from "@/lib/internal-service";
+import { validateWorkflowContextPolicies } from "@/lib/workflow-context-policy";
+import { modelTierFromAgentConfig } from "@/lib/model-tier";
 
 export async function GET() {
   const access = await requireWorkflowWriteAccess();
@@ -11,7 +13,13 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: access.error }, { status: access.status });
   }
 
-  return NextResponse.json({ ok: true, workflows: listWorkflows() });
+  return NextResponse.json({
+    ok: true,
+    workflows: listWorkflows().map((workflow) => ({
+      ...workflow,
+      accountabilityDomain: getAccountabilityAssignment("workflow", workflow.id),
+    })),
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -181,7 +189,7 @@ export async function POST(request: Request) {
         {
           ok: false,
           error: `Workflow manifest not found at ${manifestPath}`,
-          hint: 'To create a workflow from Codex Runtime, POST {"key","manifest","files"} to /agent/workflows. Codex Runtime cannot write the site service volume directly.',
+          hint: 'To create a workflow from a runtime adapter, POST {"key","manifest","files"} to /agent/workflows. Runtime adapters cannot write the site service volume directly.',
         },
         { status: 404 },
       );
@@ -201,6 +209,18 @@ export async function POST(request: Request) {
   }
   if (!Array.isArray(manifest.steps) || !manifest.steps.length) {
     return NextResponse.json({ ok: false, error: "Workflow manifest must include steps" }, { status: 400 });
+  }
+  const contextPolicyError = validateWorkflowContextPolicies(manifest);
+  if (contextPolicyError) {
+    return NextResponse.json({ ok: false, error: contextPolicyError }, { status: 400 });
+  }
+  try {
+    modelTierFromAgentConfig(manifest.agentConfig ?? manifest.agent_config);
+    for (const step of manifest.steps) {
+      if (isRecord(step)) modelTierFromAgentConfig(step.agentConfig ?? step.agent_config);
+    }
+  } catch (error) {
+    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "MODEL_TIER_INVALID" }, { status: 400 });
   }
   const normalizedManifest = normalizeManifestPaths(manifest, workflowRoot);
   if (!validateWorkflowPaths(normalizedManifest, workflowRoot)) {
@@ -244,5 +264,14 @@ export async function POST(request: Request) {
     enabled: body.enabled === false ? false : true,
   });
 
-  return NextResponse.json({ ok: true, workflow }, { status: 201 });
+  const accountabilityDomainKey = typeof body.accountabilityDomainKey === "string"
+    ? body.accountabilityDomainKey.trim()
+    : typeof body.accountability_domain_key === "string"
+      ? body.accountability_domain_key.trim()
+      : "";
+  const accountabilityAssignment = accountabilityDomainKey
+    ? assignAccountabilityDomain({ targetType: "workflow", targetKey: workflow.key, domainKey: accountabilityDomainKey })
+    : null;
+
+  return NextResponse.json({ ok: true, workflow, accountabilityAssignment }, { status: 201 });
 }

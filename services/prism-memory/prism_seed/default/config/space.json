@@ -11,26 +11,14 @@
     }
   ],
   "discord": {
-    "category_to_bucket": {
-      "684227450955235329": "townsquare",
-      "685273857338376246": "guildhq",
-      "685533846837788672": "raids",
-      "1470894727342723082": "governance",
-      "1009434800676946022": "cohort",
-      "1470888731241087128": "agency",
-      "1470885162848882809": "infrastructure",
-      "1470884971060400169": "brand"
-    },
+    "category_to_bucket": {},
     "bucket_defaults": {
       "mode": "high_signal"
     },
     "bucket_overrides": {},
     "thread_promotion": {
-      "enabled": true,
-      "thread_ids": [
-        "1420787621705027664",
-        "1483470584146038948"
-      ],
+      "enabled": false,
+      "thread_ids": [],
       "min_messages": 6,
       "min_participants": 2
     }
@@ -144,6 +132,28 @@
     }
   },
   "state": {
+    "objectives": {
+      "enabled": true,
+      "activity_windows": {
+        "active_days": 7,
+        "watching_days": 30
+      },
+      "signals": {
+        "request_refs": true,
+        "artifact_refs": true,
+        "task_refs": true,
+        "workflow_refs": true,
+        "pr_refs": true,
+        "url_refs": true,
+        "explicit_objective_keys": true,
+        "explicit_throughline_keys": true
+      },
+      "enrichment": {
+        "enabled": true,
+        "changed_only": true,
+        "max_objectives_per_run": 5
+      }
+    },
     "projects": {
       "enabled": true,
       "activity_windows": {

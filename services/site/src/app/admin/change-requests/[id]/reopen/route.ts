@@ -8,6 +8,7 @@ import {
   ensureWorkflowRunForRequest,
   findLatestAgentSessionByChangeRequest,
   getChangeRequest,
+  getSessionSummary,
   getWorkflowByKey,
   getWorkflowRunForRequest,
   listAgentMessages,
@@ -64,6 +65,7 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const body = payload as Record<string, unknown>
+  const actor = access.userId ? getSessionSummary(access.userId) : null
   const changeRequestId = readRouteParam(id)
   const targetStepKey = parseString(body.targetStepKey ?? body.target_step_key)
   const note = parseString(body.comment ?? body.note)
@@ -133,7 +135,7 @@ export async function POST(request: Request, context: RouteContext) {
         title: changeRequest.title,
         linkedChangeRequestId: changeRequest.id,
         linkedTargetEnvironmentId: changeRequest.targetEnvironmentId,
-        createdByUserId: null,
+        createdByUserId: access.userId,
         meta: { transport: "site" },
         lastMessageAt: new Date().toISOString(),
       })
@@ -150,6 +152,9 @@ export async function POST(request: Request, context: RouteContext) {
           transport: "site",
           kind: "comment",
           workflowReopen: true,
+          actorUserId: access.userId,
+          actorDisplayName: actor?.displayName ?? actor?.handle ?? actor?.email ?? null,
+          actorHandle: actor?.handle ?? null,
         },
       })
       updateAgentSession(session.id, {
@@ -166,7 +171,7 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   createAuditLog({
-    actorUserId: null,
+    actorUserId: access.userId,
     actionType: "admin.change_board_request.reopen",
     targetType: "change_request",
     targetId: changeRequest.id,

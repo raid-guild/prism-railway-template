@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { listHostedSkills, loadConfig, upsertCustomSkill } from "@/lib/app-core"
+import { listHostedSkillSourceRoots, listHostedSkills, loadConfig, upsertCustomSkill } from "@/lib/app-core"
 
 import { requireServiceAccess } from "@/lib/internal-service"
 
@@ -10,7 +10,7 @@ export async function GET() {
   }
 
   const config = loadConfig()
-  const skills = listHostedSkills(config.repoRoot, config.customSkillsRoot).map((skill) => ({
+  const skills = listHostedSkills(config.repoRoot, config.customSkillsRoot, listHostedSkillSourceRoots()).map((skill) => ({
     ...skill,
     downloadPath: `/agent/skills/${skill.name}/download`,
   }))

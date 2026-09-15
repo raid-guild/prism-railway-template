@@ -20,6 +20,10 @@ export async function requireLocalCommentAccess() {
   return requireCapabilityAccess("canComment")
 }
 
+export async function requireLocalRequestViewAccess() {
+  return requireCapabilityAccess("canViewRequests")
+}
+
 export function parseString(value: unknown) {
   return typeof value === "string" ? value.trim() : ""
 }

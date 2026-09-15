@@ -1,4 +1,4 @@
-import { Bot, GitBranch } from "lucide-react";
+import { Bot, GitBranch, LoaderCircle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import type {
@@ -10,6 +10,7 @@ import type {
 
 import {
   environmentForRequest,
+  humanHoursLabel,
   isoLabel,
   priorityVariant,
   requestSourceLabel,
@@ -38,8 +39,13 @@ export function ChangeRequestRow({
     request.currentWorkflowStepKey,
     workflowSteps(workflow),
   ).step;
+  const workflowLabel = workflow?.name ?? request.workflowKey;
   const targetBranch =
     targetEnvironment?.branch ?? targetApp?.defaultBranch ?? "No branch";
+  const isRunning = request.workflowRunStatus === "running";
+  const isCanceled = request.workflowRunStatus === "canceled";
+  const workflowAttention = request.workflowAttention;
+  const estimatedHumanHoursLabel = humanHoursLabel(request.estimatedHumanHours);
 
   return (
     <button
@@ -56,14 +62,30 @@ export function ChangeRequestRow({
 
       <div className="min-w-0 space-y-2">
         <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline">Workflow: {workflowLabel}</Badge>
           <Badge variant={workflowStepVariant(workflowStep)}>
             {workflowStep.label}
           </Badge>
+          {isRunning ? (
+            <Badge variant="default" className="gap-1">
+              <LoaderCircle className="h-3 w-3 animate-spin" />
+              running
+            </Badge>
+          ) : null}
+          {isCanceled ? <Badge variant="destructive">canceled</Badge> : null}
+          {workflowAttention ? (
+            <Badge variant="outline" className="border-amber-500/70 text-amber-700">
+              {workflowAttention.status === "blocked" ? "Blocked" : "Needs attention"}
+            </Badge>
+          ) : null}
           <Badge variant={priorityVariant(request.priority)}>
             {request.priority}
           </Badge>
           <Badge variant="outline">{request.requestType}</Badge>
           <Badge variant="outline">{requestSourceLabel(request.source)}</Badge>
+          {estimatedHumanHoursLabel ? (
+            <Badge variant="outline">{estimatedHumanHoursLabel}</Badge>
+          ) : null}
         </div>
         <h3 className="line-clamp-1 text-base font-semibold">
           {request.title}

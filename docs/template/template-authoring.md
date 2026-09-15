@@ -20,6 +20,7 @@ This repo is the source code for a Railway template. The template itself should 
 | `prism-memory` | `services/prism-memory` | Requires persistent `/data` volume. |
 | `discord-adapter` | `services/source-adapter` | Discord sync, chat, slash commands, and voice recording. Requires persistent `/data` volume for recordings/recovery. |
 | `codex-runtime` | `services/codex-runtime` | Requires persistent `/data` volume for Codex auth and target workspaces. |
+| `prism-gateway` | `services/prism-gateway` | Optional capability and connection boundary. Requires persistent `/data` volume for encrypted SQLite state. |
 | `discord-sync-cron` | `services/prism-trigger` | Cron service that calls the Discord adapter `/sync` endpoint. |
 | `memory-cron` | `services/prism-trigger` | Cron service that calls Prism memory `/ops/memory/run`. |
 | `knowledge-cron` | `services/prism-trigger` | Cron service that calls Prism memory `/ops/knowledge/run`. |
@@ -37,8 +38,14 @@ Good reference variable examples:
 - `discord-adapter.PRISM_API_BASE=https://${{prism-memory.RAILWAY_PUBLIC_DOMAIN}}`
 - `codex-runtime.APP_API_BASE_URL=http://${{site.RAILWAY_PRIVATE_DOMAIN}}:${{site.PORT}}`
 - `codex-runtime.PRISM_API_BASE=http://${{prism-memory.RAILWAY_PRIVATE_DOMAIN}}:${{prism-memory.PORT}}`
-- `codex-runtime.OUTPUT_ADAPTER_BASE_URL=http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}`
-- `codex-runtime.OUTPUT_ADAPTER_TOKEN=${{discord-adapter.SOURCE_ADAPTER_TOKEN}}`
+- `codex-runtime.COMMUNICATION_ADAPTER_BASE_URL=http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}`
+- `codex-runtime.COMMUNICATION_ADAPTER_TOKEN=${{discord-adapter.SOURCE_ADAPTER_TOKEN}}`
+- `site.PRISM_GATEWAY_BASE_URL=http://${{prism-gateway.RAILWAY_PRIVATE_DOMAIN}}:${{prism-gateway.PORT}}`
+- `site.PRISM_GATEWAY_TOKEN=${{prism-gateway.GATEWAY_SITE_TOKEN}}`
+- `codex-runtime.PRISM_GATEWAY_BASE_URL=http://${{prism-gateway.RAILWAY_PRIVATE_DOMAIN}}:${{prism-gateway.PORT}}`
+- `codex-runtime.PRISM_GATEWAY_TOKEN=${{prism-gateway.GATEWAY_CODEX_RUNTIME_TOKEN}}`
+- `task-runner.PRISM_GATEWAY_BASE_URL=http://${{prism-gateway.RAILWAY_PRIVATE_DOMAIN}}:${{prism-gateway.PORT}}`
+- `task-runner.PRISM_GATEWAY_TOKEN=${{prism-gateway.GATEWAY_TASK_RUNNER_TOKEN}}`
 - `discord-sync-cron.PRISM_API_BASE=https://${{discord-adapter.RAILWAY_PUBLIC_DOMAIN}}`
 - `memory-cron.PRISM_API_BASE=https://${{prism-memory.RAILWAY_PUBLIC_DOMAIN}}`
 - `knowledge-cron.PRISM_API_BASE=https://${{prism-memory.RAILWAY_PUBLIC_DOMAIN}}`
@@ -57,6 +64,9 @@ Template-generated secrets:
 - `INTERNAL_SERVICE_TOKEN`
 - `PRISM_API_KEY`
 - `SOURCE_ADAPTER_TOKEN`
+- `GATEWAY_MASTER_ENCRYPTION_KEY`
+- `GATEWAY_SITE_TOKEN`
+- `GATEWAY_CODEX_RUNTIME_TOKEN`
 
 ## Post-Deploy Steps
 

@@ -102,6 +102,11 @@ On a successful trigger, Prism:
 6. starts the workflow when `autoRun.enabled` is true
 7. updates `last_triggered_at`
 
+Service-token hook triggers return after the request and payload artifact are
+created. If `autoRun.enabled` is true, the workflow start is queued in the site
+process so external callers such as the Discord adapter do not have to hold a
+long webhook request open while Codex runs.
+
 The hook payload is durable request context. Agents should read it through the artifact API instead of relying on chat history or local files.
 
 ## Agent API
@@ -173,5 +178,5 @@ Likely next slices:
 - per-hook secrets for third-party webhook callers that should not receive the full agent service token
 - optional payload-to-external-ref mapping
 - replay/retry from a stored hook payload
-- hook execution history beyond `last_triggered_at`
+- hook run history beyond `last_triggered_at`
 - richer trigger diagnostics in the Hooks tab

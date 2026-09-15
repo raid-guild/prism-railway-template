@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server"
 import { getTaskRun, updateTaskRun } from "@/lib/app-core"
-import { parseNullableString, parseString, requireServiceAccess } from "@/lib/internal-service"
+import {
+  parseNullableString,
+  parseString,
+  requireServiceAccess,
+  requireTaskRunnerMutationAccess,
+} from "@/lib/internal-service"
 
 function parseConfig(value: unknown, fallback: Record<string, unknown> | undefined) {
   if (value && typeof value === "object" && !Array.isArray(value)) {
@@ -29,7 +34,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
-  const access = await requireServiceAccess()
+  const access = await requireTaskRunnerMutationAccess()
   if (!access.ok) {
     return NextResponse.json({ ok: false, error: access.error }, { status: access.status })
   }

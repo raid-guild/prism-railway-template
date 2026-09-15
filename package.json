@@ -3,8 +3,8 @@
   "private": true,
   "version": "0.1.0",
   "workspaces": [
-    "services/*",
-    "packages/*"
+    "packages/*",
+    "services/*"
   ],
   "scripts": {
     "bootstrap": "bash scripts/bootstrap.sh",
@@ -12,6 +12,14 @@
     "dev": "npm run dev --workspaces --if-present",
     "dev:all": "bash scripts/dev-all.sh",
     "dev:local": "bash scripts/dev-local-stack.sh",
+    "local:init": "node scripts/prism-local.mjs init",
+    "local:up": "node scripts/prism-local.mjs up",
+    "local:site": "node scripts/prism-local.mjs site",
+    "local:down": "node scripts/prism-local.mjs down",
+    "local:status": "node scripts/prism-local.mjs status",
+    "local:doctor": "node scripts/prism-local.mjs doctor",
+    "local:logs": "node scripts/prism-local.mjs logs",
+    "local:open": "node scripts/prism-local.mjs open",
     "lint": "npm run lint --workspaces --if-present",
     "railway:deploy-prism-stack": "bash scripts/railway-deploy-prism-stack.sh",
     "railway:bootstrap-site": "bash scripts/railway-bootstrap-api.sh",

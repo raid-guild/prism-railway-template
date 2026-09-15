@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
-export function LoginCard({ error }: { error?: string }) {
+export function LoginCard({ error, returnTo = "/admin" }: { error?: string; returnTo?: "/admin" | "/admin/lab" }) {
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md items-center px-6 py-16">
       <Card className="w-full border-border/60 bg-card/95 backdrop-blur">
@@ -20,6 +20,7 @@ export function LoginCard({ error }: { error?: string }) {
         </CardHeader>
         <CardContent>
           <form action="/admin/login" method="post" className="space-y-4">
+            <input type="hidden" name="returnTo" value={returnTo} />
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input id="email" name="email" type="email" placeholder="Optional for shared admin password" />
@@ -30,7 +31,7 @@ export function LoginCard({ error }: { error?: string }) {
             </div>
             {error ? <p className="text-sm text-destructive">{error}</p> : null}
             <Button className="w-full" type="submit">
-              Enter board
+              {returnTo === "/admin/lab" ? "Enter Prism Lab" : "Enter board"}
             </Button>
           </form>
         </CardContent>

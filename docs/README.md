@@ -2,6 +2,17 @@
 
 This directory is organized by audience and lifecycle.
 
+## User Docs
+
+End-user and operator documentation:
+
+- [Prism User Docs](user/README.md)
+- [Create And Run Your First Change Request](user/tutorials/first-change-request.md)
+- [Use Memory Explorer](user/how-to/use-memory-explorer.md)
+- [Understand The Railway Template Services](user/concepts/railway-template-services.md)
+
+The site service renders these docs at `/docs`.
+
 ## Architecture
 
 Design notes and system direction:
@@ -13,18 +24,29 @@ Design notes and system direction:
 - [Codex-First Architecture](architecture/codex-first-architecture.md)
 - [Custom Source Strategy](architecture/custom-source-strategy.md)
 - [Site API Consolidation Plan](architecture/site-api-consolidation-plan.md)
+- [Site-Owned Task Scripts](architecture/site-owned-task-scripts.md)
 - [Tasks Workflow Plan](architecture/tasks-workflow-plan.md)
+- [Runtime Adapter Contract](architecture/runtime-adapter-contract.md)
 - [Workflows](architecture/workflows.md)
 
 ## Features
 
 Feature-specific behavior and UI notes:
 
+- [Agent Run Queue And Concurrency](features/agent-run-queue-concurrency.md)
 - [Change Request Flow](features/change-request-flow.md)
+- [Prism Console Job Cancel](features/console-job-cancel.md)
 - [Custom Skills](features/custom-skills.md)
 - [Discord Voice Plan](features/discord-voice-plan.md)
+- [Discord Access Policy Checklist](features/discord-access-policy-checklist.md)
+- [Discord Historical Search](features/discord-historical-search.md)
+- [External Interaction Interfaces](features/external-interaction-interfaces.md)
+- [LLM Usage Tracking And Budgets](features/llm-usage-tracking-and-budgets.md)
+- [Working Document Upload v2](features/working-document-upload-v2.md)
 - [Member Roles](features/member-roles.md)
 - [Memory Explorer UI](features/memory-explorer-ui.md)
+- [Workflow Event Notifications](features/workflow-event-notifications.md)
+- [Prism Credential Gateway](features/prism-credential-gateway.md)
 - [Prism Stack Landing Page](features/prism-stack-landing-page.md)
 
 ## Operations
@@ -32,11 +54,20 @@ Feature-specific behavior and UI notes:
 Setup, deployment, and runtime operations:
 
 - [Codex Runtime Auth](operations/codex-runtime-auth.md)
+- [Codex Runtime Image Generation Pin](operations/codex-runtime-image-generation-pin.md)
 - [Agent API Contract](operations/agent-api-contract.md)
 - [Local VPS Deployment](operations/local-vps-deployment.md)
 - [Railway Env Checklist](operations/railway-env-checklist.md)
 - [Railway Setup](operations/railway-setup.md)
+- [Prism Gateway Migration](operations/prism-gateway-migration.md)
+- [Prism Gateway Backup, Restore, And Key Rotation](operations/prism-gateway-backup-restore.md)
 - [Template Deploy Runbook](operations/template-deploy-runbook.md)
+
+## Research
+
+Exploratory comparisons and external project research:
+
+- [Prism vs OpenClaw and Hermes](research/prism-vs-openclaw-hermes.md)
 
 ## Template
 

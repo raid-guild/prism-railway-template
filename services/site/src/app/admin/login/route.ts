@@ -11,6 +11,7 @@ import {
   createAdminSessionCookieValue,
   legacyAdminPasswordCookieName,
 } from "@/lib/admin-auth"
+import { safeAdminReturnPath } from "@/lib/admin-return-path"
 
 const { compare } = bcrypt
 
@@ -19,21 +20,22 @@ export async function POST(request: Request) {
   const formData = await request.formData()
   const email = typeof formData.get("email") === "string" ? String(formData.get("email")).trim().toLowerCase() : ""
   const password = typeof formData.get("password") === "string" ? String(formData.get("password")).trim() : ""
+  const returnTo = safeAdminReturnPath(formData.get("returnTo"))
 
   if (!password) {
-    redirect("/admin?error=missing-password")
+    redirect(`${returnTo}?error=missing-password`)
   }
 
   let sessionUser: ReturnType<typeof getSessionSummary> = null
   if (email) {
     const loginUser = getPasswordLoginUserByEmail(email)
     if (!loginUser?.passwordHash || loginUser.isBanned || !(await compare(password, loginUser.passwordHash))) {
-      redirect("/admin?error=unauthorized")
+      redirect(`${returnTo}?error=unauthorized`)
     }
     sessionUser = getSessionSummary(loginUser.id)
   } else {
     if (password !== config.adminPassword) {
-      redirect("/admin?error=unauthorized")
+      redirect(`${returnTo}?error=unauthorized`)
     }
     let adminSeedUser = getUserByEmail(config.adminEmail)
     sessionUser = adminSeedUser ? getSessionSummary(adminSeedUser.id) : null
@@ -62,5 +64,5 @@ export async function POST(request: Request) {
     updateUserLastSeen(sessionUser.id)
   }
 
-  redirect("/admin")
+  redirect(returnTo)
 }

@@ -11,10 +11,13 @@ import {
   Paperclip,
   Plus,
   RefreshCw,
+  Route,
   X,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { ChatMessageTimestamp } from "@/components/chat-message-timestamp";
+import { MemoryDocumentUploadButton } from "@/components/admin/memory-document-upload-button";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -43,6 +46,9 @@ import type {
   PrismArtifactDetail,
   PrismArtifactSummary,
   PrismKnowledgeSource,
+  PrismStateObjective,
+  PrismStateSignal,
+  PrismStateThroughline,
 } from "@/lib/prism-memory";
 
 type ArtifactsPayload = {
@@ -56,6 +62,21 @@ type SourcesPayload = {
   total: number;
 };
 
+type ObjectivesPayload = {
+  objectives: PrismStateObjective[];
+  total?: number;
+};
+
+type SignalsPayload = {
+  signals: PrismStateSignal[];
+  total?: number;
+};
+
+type ThroughlinesPayload = {
+  throughlines: PrismStateThroughline[];
+  total?: number;
+};
+
 type SortValue =
   | "created-desc"
   | "created-asc"
@@ -66,6 +87,7 @@ type SortValue =
 const artifactStatuses = ["all", "incoming", "processed", "rejected"];
 const artifactCategories = ["all", "memory", "knowledge"];
 const artifactLimits = ["25", "50", "100", "200"];
+const objectiveStatuses = ["active", "watching", "inactive", "archived", "all"];
 const sortOptions: Array<{ value: SortValue; label: string }> = [
   { value: "created-desc", label: "Newest" },
   { value: "created-asc", label: "Oldest" },
@@ -87,6 +109,20 @@ function formatDate(value?: string | null) {
 function compactHash(value?: string | null) {
   if (!value) return "None";
   return value.length > 12 ? `${value.slice(0, 12)}...` : value;
+}
+
+function formatScore(value?: number | null) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "0.00";
+  return value.toFixed(2);
+}
+
+function evidenceText(signal: PrismStateSignal) {
+  const evidence = signal.evidence ?? {};
+  const text = evidence.text;
+  if (typeof text === "string" && text.trim()) return text;
+  const url = evidence.url;
+  if (typeof url === "string" && url.trim()) return url;
+  return signal.anchor;
 }
 
 function statusVariant(status?: string | null) {
@@ -185,12 +221,15 @@ type MemoryChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  createdAt: string;
 };
 
 type StoredMemoryChatMessage = {
   id: string;
   role: string;
   content: string;
+  createdAt?: string;
+  created_at?: string;
 };
 
 const memoryChatSessionStorageKey = "prism-memory-chat-session-id";
@@ -269,6 +308,7 @@ function MemoryChat({
                 id: message.id,
                 role: message.role as "user" | "assistant",
                 content: displayMemoryChatContent(message.role, message.content),
+                createdAt: message.createdAt ?? message.created_at ?? "",
               }))
           : [];
         setSessionId(storedSessionId);
@@ -299,7 +339,12 @@ function MemoryChat({
     setError(null);
     setMessages((current) => [
       ...current,
-      { id: randomMessageId("user"), role: "user", content: prompt },
+      {
+        id: randomMessageId("user"),
+        role: "user",
+        content: prompt,
+        createdAt: new Date().toISOString(),
+      },
     ]);
     setIsPending(true);
 
@@ -337,6 +382,7 @@ function MemoryChat({
           id: randomMessageId("assistant"),
           role: "assistant",
           content: payload.output_text!,
+          createdAt: new Date().toISOString(),
         },
       ]);
     } catch (submitError) {
@@ -386,6 +432,12 @@ function MemoryChat({
                     <Badge variant={message.role === "assistant" ? "outline" : "secondary"}>
                       {message.role}
                     </Badge>
+                    {message.createdAt ? (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <ChatMessageTimestamp value={message.createdAt} />
+                      </>
+                    ) : null}
                   </div>
                   <p className="whitespace-pre-wrap">{message.content}</p>
                 </div>
@@ -467,6 +519,7 @@ export function MemoryExplorerWorkspace({
 }: {
   setup: AdminSetupStatus;
 }) {
+  const [activeTab, setActiveTab] = useState("artifacts");
   const [artifacts, setArtifacts] = useState<PrismArtifactSummary[]>([]);
   const [artifactTotal, setArtifactTotal] = useState(0);
   const [selectedArtifact, setSelectedArtifact] =
@@ -491,6 +544,21 @@ export function MemoryExplorerWorkspace({
   const [sourceLoading, setSourceLoading] = useState(false);
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
 
+  const [objectives, setObjectives] = useState<PrismStateObjective[]>([]);
+  const [objectiveTotal, setObjectiveTotal] = useState(0);
+  const [objectiveError, setObjectiveError] = useState<string | null>(null);
+  const [objectiveLoading, setObjectiveLoading] = useState(false);
+  const [objectiveStatus, setObjectiveStatus] = useState("active");
+  const [objectiveSource, setObjectiveSource] = useState("");
+  const [objectiveExternalSystem, setObjectiveExternalSystem] = useState("");
+  const [objectiveSearch, setObjectiveSearch] = useState("");
+  const [selectedObjectiveKey, setSelectedObjectiveKey] = useState<string | null>(null);
+  const [signals, setSignals] = useState<PrismStateSignal[]>([]);
+  const [signalsLoading, setSignalsLoading] = useState(false);
+  const [throughlines, setThroughlines] = useState<PrismStateThroughline[]>([]);
+  const [throughlineLoading, setThroughlineLoading] = useState(false);
+  const [selectedThroughlineKey, setSelectedThroughlineKey] = useState<string | null>(null);
+
   const selectedArtifactsForChat = useMemo(
     () => selectedArtifactIds
       .map((id) => selectedArtifactSnapshots[id] ?? artifacts.find((artifact) => artifact.id === id))
@@ -502,6 +570,48 @@ export function MemoryExplorerWorkspace({
     () => sources.find((item) => item.id === selectedSourceId) ?? null,
     [selectedSourceId, sources],
   );
+
+  const selectedObjective = useMemo(
+    () => objectives.find((item) => item.objective_key === selectedObjectiveKey) ?? null,
+    [objectives, selectedObjectiveKey],
+  );
+
+  const selectedThroughline = useMemo(
+    () => throughlines.find((item) => item.throughline_key === selectedThroughlineKey) ?? null,
+    [selectedThroughlineKey, throughlines],
+  );
+
+  const objectiveSignals = useMemo(() => {
+    if (!selectedObjective) return signals;
+    const signalIds = new Set(selectedObjective.signal_ids ?? []);
+    return signals.filter((signal) => signalIds.has(signal.signal_id));
+  }, [selectedObjective, signals]);
+
+  const visibleObjectives = useMemo(() => {
+    const search = objectiveSearch.trim().toLowerCase();
+    const throughlineObjectiveKeys = selectedThroughline
+      ? new Set(selectedThroughline.objective_keys ?? [])
+      : null;
+    return objectives.filter((objective) => {
+      if (throughlineObjectiveKeys && !throughlineObjectiveKeys.has(objective.objective_key)) {
+        return false;
+      }
+      if (!search) return true;
+      const haystack = [
+        objective.objective_key,
+        objective.title,
+        objective.status,
+        objective.summary,
+        ...(objective.anchors ?? []),
+        ...(objective.sources ?? []),
+        ...(objective.score_reasons ?? []),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(search);
+    });
+  }, [objectiveSearch, objectives, selectedThroughline]);
 
   const sourceOptions = useMemo(
     () =>
@@ -517,6 +627,14 @@ export function MemoryExplorerWorkspace({
         new Set(artifacts.map((artifact) => artifact.type).filter(Boolean)),
       ).sort() as string[],
     [artifacts],
+  );
+
+  const objectiveSourceOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(objectives.flatMap((objective) => objective.sources ?? []).filter(Boolean)),
+      ).sort(),
+    [objectives],
   );
 
   const visibleArtifacts = useMemo(() => {
@@ -618,9 +736,85 @@ export function MemoryExplorerWorkspace({
     }
   }
 
+  async function loadObjectives() {
+    setObjectiveLoading(true);
+    setObjectiveError(null);
+    try {
+      const params = new URLSearchParams();
+      params.set("limit", "250");
+      if (objectiveStatus !== "all") params.set("status", objectiveStatus);
+      if (objectiveSource.trim()) params.set("source", objectiveSource.trim());
+      if (objectiveExternalSystem.trim()) {
+        params.set("externalSystem", objectiveExternalSystem.trim());
+      }
+      const payload = await fetchJson<ObjectivesPayload>(
+        `/admin/memory/api/state/objectives?${params.toString()}`,
+      );
+      const nextObjectives = payload.objectives ?? [];
+      setObjectives(nextObjectives);
+      setObjectiveTotal(payload.total ?? nextObjectives.length);
+      setSelectedObjectiveKey((current) =>
+        current && nextObjectives.some((objective) => objective.objective_key === current)
+          ? current
+          : nextObjectives[0]?.objective_key ?? null,
+      );
+    } catch (error) {
+      setObjectiveError(
+        error instanceof Error ? error.message : "Could not load objectives",
+      );
+    } finally {
+      setObjectiveLoading(false);
+    }
+  }
+
+  async function loadThroughlines() {
+    setThroughlineLoading(true);
+    try {
+      const payload = await fetchJson<ThroughlinesPayload>(
+        "/admin/memory/api/state/throughlines?limit=100",
+      );
+      const nextThroughlines = (payload.throughlines ?? []).filter(
+        (throughline) => throughline.status !== "inactive" && throughline.status !== "archived",
+      );
+      setThroughlines(nextThroughlines);
+      setSelectedThroughlineKey((current) =>
+        current && nextThroughlines.some((throughline) => throughline.throughline_key === current)
+          ? current
+          : null,
+      );
+    } catch (error) {
+      setObjectiveError(
+        error instanceof Error ? error.message : "Could not load throughlines",
+      );
+    } finally {
+      setThroughlineLoading(false);
+    }
+  }
+
+  async function loadSignals(objectiveKey?: string | null) {
+    setSignalsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("limit", "250");
+      if (objectiveKey) params.set("objective_key", objectiveKey);
+      const payload = await fetchJson<SignalsPayload>(
+        `/admin/memory/api/state/signals?${params.toString()}`,
+      );
+      setSignals(payload.signals ?? []);
+    } catch (error) {
+      setObjectiveError(
+        error instanceof Error ? error.message : "Could not load signals",
+      );
+    } finally {
+      setSignalsLoading(false);
+    }
+  }
+
   useEffect(() => {
     loadArtifacts();
     loadSources();
+    loadObjectives();
+    loadThroughlines();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -628,6 +822,16 @@ export function MemoryExplorerWorkspace({
     loadArtifacts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category, status, source, type, limit]);
+
+  useEffect(() => {
+    loadObjectives();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [objectiveStatus, objectiveSource, objectiveExternalSystem]);
+
+  useEffect(() => {
+    loadSignals(selectedObjectiveKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedObjectiveKey]);
 
   function setArtifactChatSelection(artifact: PrismArtifactSummary, selected: boolean) {
     setSelectedArtifactIds((current) => {
@@ -676,9 +880,9 @@ export function MemoryExplorerWorkspace({
         </div>
       </div>
 
-      <Tabs defaultValue="artifacts" className="flex flex-1 flex-col">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-1 flex-col">
         <div className="sticky top-16 z-20 border-b border-border/60 bg-background/95 backdrop-blur">
-          <div className="px-5 py-3 md:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 md:px-6">
             <TabsList className="h-auto flex-wrap rounded-2xl bg-transparent p-0">
               <TabsTrigger
                 value="artifacts"
@@ -699,6 +903,15 @@ export function MemoryExplorerWorkspace({
                 </Badge>
               </TabsTrigger>
               <TabsTrigger
+                value="objectives"
+                className="rounded-xl border border-transparent px-4 py-2.5 data-[state=active]:border-border/70 data-[state=active]:bg-background"
+              >
+                Objectives
+                <Badge variant="outline" className="ml-2">
+                  {objectiveTotal}
+                </Badge>
+              </TabsTrigger>
+              <TabsTrigger
                 value="chat"
                 className="rounded-xl border border-transparent px-4 py-2.5 data-[state=active]:border-border/70 data-[state=active]:bg-background"
               >
@@ -708,6 +921,15 @@ export function MemoryExplorerWorkspace({
                 </Badge>
               </TabsTrigger>
             </TabsList>
+            {activeTab === "artifacts" ? (
+              <MemoryDocumentUploadButton
+                disabled={!setup.prismMemory.reachable}
+                onUploaded={async (artifact) => {
+                  await loadArtifacts();
+                  await loadArtifactDetail(artifact.id);
+                }}
+              />
+            ) : null}
           </div>
         </div>
 
@@ -921,13 +1143,25 @@ export function MemoryExplorerWorkspace({
                     <Badge variant="outline">{selectedArtifact.category}</Badge>
                     <Badge variant="outline">{selectedArtifact.source ?? "unknown"}</Badge>
                   </div>
-                  {selectedArtifact.url ? (
-                    <Button asChild variant="outline">
-                      <a href={selectedArtifact.url} target="_blank" rel="noreferrer">
-                        <ExternalLink className="h-4 w-4" />
-                        Source
-                      </a>
-                    </Button>
+                  {selectedArtifact.view_url || selectedArtifact.url ? (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedArtifact.view_url ? (
+                        <Button asChild variant="outline">
+                          <a href={selectedArtifact.view_url} target="_blank" rel="noreferrer">
+                            <ExternalLink className="h-4 w-4" />
+                            Memory View
+                          </a>
+                        </Button>
+                      ) : null}
+                      {selectedArtifact.url ? (
+                        <Button asChild variant="outline">
+                          <a href={selectedArtifact.url} target="_blank" rel="noreferrer">
+                            <ExternalLink className="h-4 w-4" />
+                            Source
+                          </a>
+                        </Button>
+                      ) : null}
+                    </div>
                   ) : null}
                   <div>
                     <p className="mb-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">
@@ -1111,6 +1345,389 @@ export function MemoryExplorerWorkspace({
                 <EmptyState
                   title="Select a source"
                   body="Choose a source to inspect sync state, docs roots, patterns, and recent errors."
+                />
+              )}
+            </DetailShell>
+          </section>
+        </TabsContent>
+
+        <TabsContent value="objectives" className="mt-0 flex-1">
+          <section className="grid min-h-full xl:grid-cols-[minmax(0,1fr)_460px]">
+            <div className="min-w-0">
+              <div className="grid gap-3 border-b border-border/60 px-5 py-4 md:px-6 lg:grid-cols-[1.5fr_repeat(3,minmax(120px,170px))_auto]">
+                <div className="space-y-2">
+                  <Label>Search objectives</Label>
+                  <Input
+                    value={objectiveSearch}
+                    onChange={(event) => setObjectiveSearch(event.target.value)}
+                    placeholder="Search title, key, anchors..."
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Status</Label>
+                  <Select value={objectiveStatus} onValueChange={setObjectiveStatus}>
+                    <SelectTrigger className="border border-border">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {objectiveStatuses.map((item) => (
+                        <SelectItem key={item} value={item}>
+                          {item}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Source</Label>
+                  <Select value={objectiveSource || "all"} onValueChange={(value) => setObjectiveSource(value === "all" ? "" : value)}>
+                    <SelectTrigger className="border border-border">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">all</SelectItem>
+                      {objectiveSourceOptions.map((item) => (
+                        <SelectItem key={item} value={item}>
+                          {item}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>External</Label>
+                  <Input
+                    value={objectiveExternalSystem}
+                    onChange={(event) => setObjectiveExternalSystem(event.target.value)}
+                    placeholder="portal"
+                  />
+                </div>
+                <div className="flex items-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      loadObjectives();
+                      loadThroughlines();
+                      loadSignals(selectedObjectiveKey);
+                    }}
+                    disabled={objectiveLoading || throughlineLoading || signalsLoading}
+                  >
+                    {objectiveLoading || throughlineLoading || signalsLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {objectiveError ? (
+                <div className="border-b border-border/60 px-5 py-3 text-sm text-destructive md:px-6">
+                  {objectiveError}
+                </div>
+              ) : null}
+
+              <div className="grid border-b border-border/60 px-5 py-4 md:px-6 lg:grid-cols-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                    Objectives
+                  </p>
+                  <p className="mt-1 text-2xl font-semibold">{visibleObjectives.length}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                    Open Throughlines
+                  </p>
+                  <p className="mt-1 text-2xl font-semibold">{throughlines.length}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                    Loaded Signals
+                  </p>
+                  <p className="mt-1 text-2xl font-semibold">{signals.length}</p>
+                </div>
+              </div>
+
+              <div className="border-b border-border/60 px-5 py-4 md:px-6">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                      Throughlines
+                    </p>
+                    {selectedThroughline ? (
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Filtering objectives by {selectedThroughline.title}
+                      </p>
+                    ) : null}
+                  </div>
+                  <Button
+                    type="button"
+                    variant={selectedThroughlineKey ? "outline" : "secondary"}
+                    size="sm"
+                    onClick={() => setSelectedThroughlineKey(null)}
+                  >
+                    All
+                  </Button>
+                </div>
+                {throughlineLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading throughlines...
+                  </div>
+                ) : throughlines.length ? (
+                  <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+                    {throughlines.slice(0, 12).map((throughline) => {
+                      const selected = throughline.throughline_key === selectedThroughlineKey;
+                      return (
+                        <button
+                          key={throughline.throughline_key}
+                          type="button"
+                          className="border border-border bg-background/70 p-3 text-left transition-colors hover:bg-muted/50 data-[state=selected]:border-primary data-[state=selected]:bg-muted"
+                          data-state={selected ? "selected" : undefined}
+                          onClick={() => {
+                            setSelectedThroughlineKey(throughline.throughline_key);
+                            const firstObjectiveKey = throughline.objective_keys?.[0] ?? null;
+                            if (firstObjectiveKey) {
+                              setSelectedObjectiveKey(firstObjectiveKey);
+                            }
+                          }}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <Route className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                <p className="truncate text-sm font-medium">{throughline.title}</p>
+                              </div>
+                              <p className="mt-1 truncate text-xs text-muted-foreground">
+                                {throughline.throughline_key}
+                              </p>
+                            </div>
+                            <Badge variant="outline">
+                              {throughline.objective_keys?.length ?? 0}
+                            </Badge>
+                            <Badge variant={statusVariant(throughline.status)}>
+                              {throughline.status}
+                            </Badge>
+                          </div>
+                          {throughline.summary ? (
+                            <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">
+                              {throughline.summary}
+                            </p>
+                          ) : null}
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            Last signal {formatDate(throughline.last_signal_at)}
+                          </p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <EmptyState
+                    title="No active throughlines"
+                    body="Run generated state with enrichment or add explicit throughline keys to source metadata."
+                  />
+                )}
+              </div>
+
+              {visibleObjectives.length ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>
+                        {selectedThroughline ? "Objective In Throughline" : "Objective"}
+                      </TableHead>
+                      <TableHead className="w-28">Status</TableHead>
+                      <TableHead className="w-28 text-right">Activity</TableHead>
+                      <TableHead className="w-28 text-right">Attention</TableHead>
+                      <TableHead className="w-40">Last signal</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {visibleObjectives.map((objective) => (
+                      <TableRow
+                        key={objective.objective_key}
+                        className="cursor-pointer"
+                        data-state={selectedObjectiveKey === objective.objective_key ? "selected" : undefined}
+                        onClick={() => setSelectedObjectiveKey(objective.objective_key)}
+                      >
+                        <TableCell>
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{objective.title || objective.objective_key}</p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {objective.objective_key}
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {(objective.sources ?? []).slice(0, 4).map((item) => (
+                                <Badge key={item} variant="outline">
+                                  {item}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={statusVariant(objective.status)}>
+                            {objective.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right text-xs">
+                          {formatScore(objective.activity_score)}
+                        </TableCell>
+                        <TableCell className="text-right text-xs">
+                          {formatScore(objective.attention_score)}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {formatDate(objective.last_signal_at)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <div className="p-5 md:p-6">
+                  <EmptyState
+                    title={objectiveLoading ? "Loading objectives" : "No objectives found"}
+                    body="Try a wider status/source filter or run generated state in Prism Memory."
+                  />
+                </div>
+              )}
+            </div>
+
+            <DetailShell
+              title={selectedObjective?.title ?? "Objective Detail"}
+              subtitle={selectedObjective?.objective_key}
+            >
+              {selectedObjective ? (
+                <div className="space-y-5">
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant={statusVariant(selectedObjective.status)}>
+                      {selectedObjective.status}
+                    </Badge>
+                    <Badge variant="outline">
+                      activity {formatScore(selectedObjective.activity_score)}
+                    </Badge>
+                    <Badge variant="outline">
+                      confidence {formatScore(selectedObjective.confidence_score)}
+                    </Badge>
+                    <Badge variant="outline">
+                      {selectedObjective.enrichment_status ?? "unenriched"}
+                    </Badge>
+                  </div>
+
+                  {selectedObjective.summary ? (
+                    <p className="text-sm leading-6">{selectedObjective.summary}</p>
+                  ) : null}
+
+                  <div>
+                    <p className="mb-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                      Score Reasons
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {(selectedObjective.score_reasons ?? []).length ? (
+                        selectedObjective.score_reasons?.map((reason) => (
+                          <Badge key={reason} variant="outline">
+                            {reason}
+                          </Badge>
+                        ))
+                      ) : (
+                        <span className="text-sm text-muted-foreground">None</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                      Anchors
+                    </p>
+                    <div className="flex max-h-32 flex-wrap gap-2 overflow-auto">
+                      {(selectedObjective.anchors ?? []).map((anchor) => (
+                        <Badge key={anchor} variant="outline">
+                          {anchor}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+
+                  {throughlines.length ? (
+                    <div>
+                      <p className="mb-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                        Throughlines
+                      </p>
+                      <div className="space-y-2">
+                        {throughlines
+                          .filter((throughline) => throughline.objective_keys?.includes(selectedObjective.objective_key))
+                          .map((throughline) => (
+                            <div key={throughline.throughline_key} className="border border-border bg-background/70 p-3">
+                              <div className="flex items-center gap-2">
+                                <Route className="h-4 w-4 text-muted-foreground" />
+                                <p className="text-sm font-medium">{throughline.title}</p>
+                              </div>
+                              <p className="mt-1 break-all text-xs text-muted-foreground">
+                                {throughline.throughline_key}
+                              </p>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div>
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                        Signals
+                      </p>
+                      <Badge variant="outline">{objectiveSignals.length}</Badge>
+                    </div>
+                    {signalsLoading ? (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Loading signals...
+                      </div>
+                    ) : objectiveSignals.length ? (
+                      <div className="space-y-3">
+                        {objectiveSignals.slice(0, 25).map((signal) => {
+                          const url = signal.evidence?.url;
+                          return (
+                            <div key={signal.signal_id} className="border border-border bg-background/70 p-3">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant="outline">{signal.kind}</Badge>
+                                <span className="break-all text-xs text-muted-foreground">
+                                  {signal.anchor}
+                                </span>
+                              </div>
+                              <p className="mt-2 line-clamp-3 text-sm">
+                                {evidenceText(signal)}
+                              </p>
+                              <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                                <span>{formatDate(signal.occurred_at)}</span>
+                                {typeof url === "string" && url.trim() ? (
+                                  <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-foreground">
+                                    <ExternalLink className="h-3.5 w-3.5" />
+                                    Evidence
+                                  </a>
+                                ) : null}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <EmptyState
+                        title="No signals loaded"
+                        body="Select another objective or refresh generated state."
+                      />
+                    )}
+                  </div>
+
+                  <pre className="max-h-80 overflow-auto border border-border bg-[var(--code-surface)] p-3 text-xs leading-5 text-[var(--code-surface-foreground)]">
+                    {jsonPreview(selectedObjective)}
+                  </pre>
+                </div>
+              ) : (
+                <EmptyState
+                  title="Select an objective"
+                  body="Choose an objective to inspect anchors, throughlines, and evidence signals."
                 />
               )}
             </DetailShell>

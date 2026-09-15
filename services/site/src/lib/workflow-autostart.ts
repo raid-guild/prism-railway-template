@@ -3,9 +3,8 @@ import {
   getChangeRequest,
   getWorkflowByKey,
   getWorkflowRunForRequest,
-  loadConfig,
 } from "@/lib/app-core"
-import { getInternalServiceToken } from "@/lib/internal-service"
+import { enqueueWorkflowAgentRun } from "@/lib/workflow-agent-run-queue"
 
 type WorkflowAutoStartResult = {
   started: boolean
@@ -60,10 +59,6 @@ function currentWorkflowStep(request: ChangeRequestRecord) {
   return steps[0] ?? null
 }
 
-function defaultBaseUrl() {
-  return `http://127.0.0.1:${loadConfig().port}`
-}
-
 export async function autoStartWorkflowRequest(
   request: ChangeRequestRecord,
   options: { baseUrl?: string | null; requestedSkills?: string[] } = {},
@@ -74,51 +69,41 @@ export async function autoStartWorkflowRequest(
   if (!step || !key) {
     return { started: false, reason: "workflow_step_not_found" }
   }
-  if (stepType(step) !== "agent") {
+  const type = stepType(step)
+  if (type !== "agent" && type !== "loop") {
     return { started: false, reason: "current_step_is_not_agent" }
   }
 
-  const baseUrl = (options.baseUrl?.trim() || defaultBaseUrl()).replace(/\/+$/, "")
   const prompt = [
-    `Run workflow step ${key} for request #${freshRequest.requestNumber}: ${freshRequest.title}.`,
+    type === "loop"
+      ? `Run the next runnable workflow step for request #${freshRequest.requestNumber}: ${freshRequest.title}. The site may resolve a control-flow step before this agent run starts.`
+      : `Run workflow step ${key} for request #${freshRequest.requestNumber}: ${freshRequest.title}.`,
     `Step label: ${stepLabel(step)}.`,
-    typeof step.instructionPath === "string" && step.instructionPath.trim()
+    type === "loop"
+      ? "Use the current workflow step instructions from runtime metadata after control-flow resolution."
+      : typeof step.instructionPath === "string" && step.instructionPath.trim()
       ? `Use the workflow step instructions at ${step.instructionPath.trim()}.`
       : "Use the current workflow step instructions from runtime metadata.",
     "Use the request context and thread history. Return a concise summary of what changed or what should happen next.",
   ].join("\n")
 
   try {
-    const response = await fetch(`${baseUrl}/agent/responses`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Service-Token": getInternalServiceToken(),
-      },
-      body: JSON.stringify({
-        input: [{ role: "user", content: prompt }],
-        linked_change_request_id: freshRequest.id,
-        workflow_action: null,
-        auto_continue_until_gate: true,
-        requested_skills: options.requestedSkills ?? [],
-      }),
+    const result = enqueueWorkflowAgentRun({
+      request: freshRequest,
+      prompt,
+      workflowAction: null,
+      requestedSkills: options.requestedSkills ?? [],
+      baseUrl: options.baseUrl,
     })
-    const text = await response.text()
-    let payload: unknown = text
-    try {
-      payload = text ? JSON.parse(text) : null
-    } catch {
-      payload = text
-    }
-    if (!response.ok) {
+    if (!result.queued) {
       return {
         started: false,
-        reason: "workflow_start_failed",
-        status: response.status,
-        response: payload,
+        reason: result.reason ?? "workflow_start_failed",
+        status: result.status,
+        response: result,
       }
     }
-    return { started: true, status: response.status, response: payload }
+    return { started: true, status: result.status, response: result }
   } catch (error) {
     return {
       started: false,

@@ -21,6 +21,7 @@ Documentation starts at [docs/README.md](docs/README.md).
 Template authoring notes live in [docs/template/template-authoring.md](docs/template/template-authoring.md).
 Post-deploy template operations live in [docs/operations/template-deploy-runbook.md](docs/operations/template-deploy-runbook.md).
 Non-Railway deployment notes live in [docs/operations/local-vps-deployment.md](docs/operations/local-vps-deployment.md).
+Template versioning and update behavior live in [docs/template/versioning-and-updates.md](docs/template/versioning-and-updates.md).
 Prism Memory storage cleanup planning lives in [docs/archive/prism-memory-path-cleanup.md](docs/archive/prism-memory-path-cleanup.md).
 Site/API consolidation planning lives in [docs/architecture/site-api-consolidation-plan.md](docs/architecture/site-api-consolidation-plan.md).
 Site/API live cutover steps live in [docs/archive/site-api-cutover-checklist.md](docs/archive/site-api-cutover-checklist.md).
@@ -57,7 +58,7 @@ Owns:
 - public/admin routes
 - auth and sessions
 - profiles, points, badges, and admin flows
-- change requests, executions, targets, and deploy metadata as the system of record
+- change requests, agent runs, targets, and deploy metadata as the system of record
 - agent chat sessions and Discord thread linkage as durable conversation state
 - the internal app API surface consumed by Codex runtime and Discord
 - the app SQLite/runtime volume at `/data`
@@ -91,7 +92,7 @@ Owns:
 Does not own:
 
 - durable request state
-- execution history as the source of truth
+- agent-run history as the source of truth
 - deploy metadata
 - Discord transport concerns
 - durable app-side chat session storage
@@ -171,6 +172,17 @@ npm run dev:all
 
 For local development, use concrete loopback URLs in `.env`; Railway template references such as `${{api.RAILWAY_PRIVATE_DOMAIN}}` only resolve inside Railway templates.
 
+Local lifecycle commands report the installed Prism version and check the
+canonical `superprismio/prism-railway-template` `main` branch for updates:
+
+```bash
+npm run local:status
+npm run local:doctor
+```
+
+The check is informational and never changes the checkout. Review and preserve
+local modifications before pulling or merging an update.
+
 Minimum local values:
 
 ```text
@@ -182,8 +194,8 @@ PRISM_API_BASE=http://127.0.0.1:8788
 PRISM_API_KEY=replace-me
 INTERNAL_SERVICE_TOKEN=replace-me
 SOURCE_ADAPTER_TOKEN=replace-me
-OUTPUT_ADAPTER_BASE_URL=http://127.0.0.1:8789
-OUTPUT_ADAPTER_TOKEN=replace-me
+COMMUNICATION_ADAPTER_BASE_URL=http://127.0.0.1:8789
+COMMUNICATION_ADAPTER_TOKEN=replace-me
 ```
 
 Codex runtime needs local Codex auth. The default `.env.example` uses your normal `~/.codex`:
@@ -259,7 +271,7 @@ For a first Railway bring-up:
 7. Deploy `codex-runtime` with persistent `CODEX_HOME` storage and complete `codex login` once in the running service.
 8. Deploy `discord-adapter` with Discord bot credentials, app API base URL, internal service token, and `CODEX_RUNTIME_BASE_URL`.
 9. Set shared URLs so `codex-runtime` and `discord-adapter` point to `site`, and services point to `prism-memory` where needed.
-10. Set secrets in Railway, especially `SESSION_SECRET`, `INTERNAL_SERVICE_TOKEN`, `ADMIN_PASSWORD`, `PRISM_API_KEY`, `SOURCE_ADAPTER_TOKEN`, `OUTPUT_ADAPTER_TOKEN`, and Codex/Discord credentials.
+10. Set secrets in Railway, especially `SESSION_SECRET`, `INTERNAL_SERVICE_TOKEN`, `ADMIN_PASSWORD`, `PRISM_API_KEY`, `SOURCE_ADAPTER_TOKEN`, `COMMUNICATION_ADAPTER_TOKEN`, and Codex/Discord credentials.
 10. Deploy `site` and confirm `/admin` loads.
 
 API bootstrap split:

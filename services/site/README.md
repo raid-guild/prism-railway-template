@@ -16,3 +16,7 @@ Current scaffold:
 - `/` is a public landing page for the Prism Agent stack
 - `/admin` is a password-gated board shell for target apps, environments, and change requests
 - admin auth is currently a shared password cookie that the site forwards to the API as `x-admin-password`
+
+Deploy check:
+
+- site service deploys from the SuperPrism fork `main` branch

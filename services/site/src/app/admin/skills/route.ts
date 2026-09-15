@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-import { listHostedSkills, loadConfig } from "@/lib/app-core"
+import { listHostedSkillSourceRoots, listHostedSkills, loadConfig } from "@/lib/app-core"
 import { requireLocalAdminAccess } from "@/lib/local-admin-api"
 
 export async function GET() {
@@ -12,6 +12,6 @@ export async function GET() {
   const config = loadConfig()
   return NextResponse.json({
     ok: true,
-    skills: listHostedSkills(config.repoRoot, config.customSkillsRoot),
+    skills: listHostedSkills(config.repoRoot, config.customSkillsRoot, listHostedSkillSourceRoots()),
   })
 }

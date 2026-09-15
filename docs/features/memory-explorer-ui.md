@@ -8,7 +8,7 @@ It lives outside the change board at:
 /admin/memory
 ```
 
-The change board remains focused on change requests, target apps, execution records, and Codex runs. Memory exploration is a related operator workflow, but it needs its own route because it has different layout needs: artifact tables, document previews, raw payload inspection, scoped memory chat, and future retrieval or graph tools.
+The change board remains focused on change requests, target apps, agent-run records, and Codex runs. Memory exploration is a related operator workflow, but it needs its own route because it has different layout needs: artifact tables, document previews, raw payload inspection, scoped memory chat, and future retrieval or graph tools.
 
 ## Purpose
 

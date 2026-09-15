@@ -52,6 +52,16 @@ X-Prism-Reason: <short reason>
   `POST /ops/memory/run`
 - Run memory backfill:
   `POST /ops/memory/backfill?days=...&force=true`
+- Run generated state rebuild:
+  `POST /ops/state/run?date=YYYY-MM-DD&force=true`
+- Run generated state backfill:
+  `POST /ops/state/backfill?days=...&force=true`
+- Curate throughline state:
+  `PATCH /state/throughlines/{throughline_key}`
+- Merge duplicate throughlines:
+  `POST /state/throughlines/{throughline_key}/merge`
+- Hide/delete a generated throughline:
+  `DELETE /state/throughlines/{throughline_key}`
 - Run knowledge pipeline:
   `POST /ops/knowledge/run`
 
@@ -62,6 +72,8 @@ X-Prism-Reason: <short reason>
 - When changing optional features, preserve unrelated config.
 - Prefer `enabled=true|false` plus `scope=bot_only|scoped|all` in new config writes.
 - Treat legacy `mode` fields as backward-compatible input only.
+- Treat `space.json.state.objectives` as policy/config, not living objective state.
+- Do not write current objectives, signals, throughlines, summaries, or daily status into `space.json`; rebuild generated state through `/ops/state/*` and use `/state/throughlines/*` curation routes for throughline edits.
 - For agentic ingest:
   - default to `enabled=false`
   - use `scope=bot_only` for first experiments

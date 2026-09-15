@@ -25,7 +25,13 @@ Use this while filling out the Railway template composer.
 | `PORT` | `3100` | Port the site service listens on. | No |
 | `NODE_ENV` | `production` | Runtime environment for the site service. | No |
 | `NEXT_PUBLIC_API_BASE_URL` | `https://${{api.RAILWAY_PUBLIC_DOMAIN}}` | Browser-facing API URL used by the site. | No |
+| `NEXT_PUBLIC_INTERACTION_BASE_URL` | `https://${{discord-adapter.RAILWAY_PUBLIC_DOMAIN}}` | Browser-visible base URL used to display external interaction endpoints. | Yes |
 | `API_INTERNAL_BASE_URL` | `https://${{api.RAILWAY_PUBLIC_DOMAIN}}` | Server-side API URL used by the site. | No |
+| `COMMUNICATION_ADAPTER_BASE_URL` | `http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}` | Private communication adapter URL used by Site server routes. | Yes |
+| `PRISM_LAB_ENABLED` | `false` | Opt-in rollout switch for `/admin/lab`. Only `true` enables the live Lab workspace; missing or other values keep it disabled. | Yes |
+| `PRISM_GATEWAY_ENABLED` | `true` | Shows Gateway connection administration. Set false only when Gateway is intentionally omitted. | Yes |
+| `PRISM_GATEWAY_BASE_URL` | `http://${{prism-gateway.RAILWAY_PRIVATE_DOMAIN}}:${{prism-gateway.PORT}}` | Private Gateway URL used by Site server routes. | Yes |
+| `PRISM_GATEWAY_TOKEN` | `${{prism-gateway.GATEWAY_SITE_TOKEN}}` | Site-specific Gateway caller token. Never expose it to browser code. | Yes |
 
 ## Prism Memory
 
@@ -43,6 +49,20 @@ Use this while filling out the Railway template composer.
 | `AGENTIC_INGEST_TIMEOUT_SECONDS` | `30` | Optional request timeout for provider calls. | Yes |
 | `AGENTIC_INGEST_SCOPED_SOURCES` | empty | Optional comma-separated source allowlist used when scope is `scoped`. | Yes |
 | `AGENTIC_INGEST_SCOPED_BUCKETS` | empty | Optional comma-separated bucket allowlist used when scope is `scoped`. | Yes |
+
+## Prism Gateway
+
+| Variable | Value | Description | Optional? |
+| --- | --- | --- | --- |
+| `PORT` | `8794` | Port the Gateway service listens on. | No |
+| `NODE_ENV` | `production` | Runtime environment for Gateway. | No |
+| `GATEWAY_MASTER_ENCRYPTION_KEY` | `${{ secret(32) }}` | Current root key used to encrypt connection credentials. Never replace it without the key-rotation runbook. | No |
+| `GATEWAY_MASTER_KEY_VERSION` | `v1` | Version recorded with encrypted credential rows. | No |
+| `GATEWAY_PREVIOUS_MASTER_ENCRYPTION_KEY` | empty | Previous root key used temporarily during a documented rotation. Set together with its version, then remove after re-encryption. | Yes |
+| `GATEWAY_PREVIOUS_MASTER_KEY_VERSION` | empty | Version for the temporary previous root key. | Yes |
+| `GATEWAY_SITE_TOKEN` | `${{ secret(64) }}` | Caller-specific token for server-side Site administration calls. | No |
+| `GATEWAY_CODEX_RUNTIME_TOKEN` | `${{ secret(64) }}` | Caller-specific token for Codex Runtime connected-service use and job-scoped leases. | No |
+| `GATEWAY_TASK_RUNNER_TOKEN` | `${{ secret(64) }}` | Caller-specific token for Task Runner job-scoped credential leases. | No |
 
 ## Discord Adapter
 
@@ -85,6 +105,37 @@ Use this while filling out the Railway template composer.
 | `VOICE_TRANSCRIPTION_TIMESTAMPS` | `true` | Requests timestamp segments from the transcription endpoint. | Yes |
 | `CODEX_RUNTIME_REQUEST_TIMEOUT_SECONDS` | `660` | Timeout for adapter calls to Codex Runtime. | No |
 
+## Buzz Adapter
+
+Deploy the source-adapter directory as a separate `buzz-adapter` service. It
+uses the same Prism ingest and checkpoint variables documented above, with the
+following Buzz-specific configuration.
+
+| Variable | Value | Description | Optional? |
+| --- | --- | --- | --- |
+| `SOURCE_KIND` | `buzz` | Selects Buzz collection for `/sync`. | No |
+| `BUZZ_ENABLED` | `true` | Enables Buzz destination discovery, collection, and delivery. | No |
+| `BUZZ_RELAY_URL` | `https://buzz.example.org` | HTTP base URL for the Buzz relay. | No |
+| `BUZZ_PRIVATE_KEY` | secret | Dedicated Nostr private key for the Prism Buzz identity. | No |
+| `BUZZ_PUBLIC_KEY` | public hex key | Public key used to identify and optionally ignore adapter-authored events. | No |
+| `BUZZ_CHANNEL_ALLOWLIST` | channel UUIDs | Required comma-separated collection and delivery boundary. | No |
+| `BUZZ_SYNC_WINDOW_HOURS` | `24` | Initial/reset lookback window. | No |
+| `BUZZ_MAX_MESSAGES_PER_CHANNEL` | `500` | Maximum events fetched per channel per sync. | No |
+| `BUZZ_IGNORE_OWN_MESSAGES` | `true` | Excludes messages authored by the adapter identity from Memory ingestion. | No |
+| `BUZZ_CLI_TIMEOUT_SECONDS` | `30` | Timeout for each signed Buzz CLI operation. | No |
+| `BUZZ_CHECKPOINT_EVENT_LIMIT` | `10000` | Recent event IDs retained to deduplicate overlap and retry windows. | No |
+| `BUZZ_CLI_PATH` | `buzz` | Optional override for the pinned CLI installed in the adapter image. | Yes |
+| `APP_API_BASE_URL` | `http://${{site.RAILWAY_PRIVATE_DOMAIN}}:${{site.PORT}}` | Private Site API used for profiles, sessions, and runtime invocation. | Required for interaction |
+| `APP_API_SERVICE_TOKEN` | `${{site.INTERNAL_SERVICE_TOKEN}}` | Site service-token reference; do not copy the underlying value. | Required for interaction |
+| `BUZZ_INTERACTION_ENABLED` | `false` | Enables continuous structured-mention polling and replies. | Yes |
+| `BUZZ_INTERACTION_PROFILE_KEY` | profile key | Legacy single-profile label. New deployments route each channel through Site source-adapter policy. | No |
+| `BUZZ_INTERACTION_DISPLAY_NAME` | `Prism` | Leading `@name` removed from the runtime prompt. | Yes |
+| `BUZZ_INTERACTION_POLL_SECONDS` | `5` | Delay between non-overlapping interaction polls. | Yes |
+| `BUZZ_INTERACTION_LOOKBACK_SECONDS` | `3600` | First-start lookback; durable checkpoints are used afterward. | Yes |
+| `BUZZ_HISTORY_CHANNEL_ALLOWLIST` | channel UUIDs | Channels readable through the internal service-authenticated direct-history route. Empty disables the route. | Yes |
+| `BUZZ_HISTORY_MAX_LOOKBACK_SECONDS` | `7200` | Maximum direct-history lookback accepted by the adapter. | Yes |
+| `BUZZ_HISTORY_MAX_MESSAGES` | `100` | Maximum messages returned by one direct-history request. | Yes |
+
 ## Codex Runtime
 
 | Variable | Value | Description | Optional? |
@@ -94,6 +145,8 @@ Use this while filling out the Railway template composer.
 | `CODEX_BIN` | `/app/node_modules/.bin/codex` | Path to the Codex CLI binary inside the runtime image. | No |
 | `CODEX_HOME` | `/data/codex` | Mounted Codex home directory for auth and thread state. | No |
 | `CODEX_RUNTIME_TIMEOUT_MS` | `600000` | Maximum Codex execution timeout in milliseconds. | No |
+| `CODEX_RUNTIME_PROMPT_WARN_BYTES` | empty | Emits a size warning trace when the composed stdin prompt exceeds this byte count. | Yes |
+| `CODEX_RUNTIME_PROMPT_MAX_BYTES` | empty | Rejects an oversized composed prompt with structured section metrics before spawning Codex. | Yes |
 | `CODEX_IMAGE_GENERATION_ENABLED` | `true` | Enables the Codex CLI built-in `image_generation` feature for `$imagegen` workflows. | No |
 | `CODEX_WORKSPACE_ROOT` | `/app` | Default workspace root for Codex execution. | No |
 | `CODEX_TARGET_WORKSPACE_ROOT` | `/data/workspaces` | Mounted directory for cloned target repositories. | No |
@@ -101,8 +154,12 @@ Use this while filling out the Railway template composer.
 | `PRISM_API_KEY` | `${{prism-memory.PRISM_API_KEY}}` | Prism Memory API key reference. | No |
 | `APP_API_BASE_URL` | `http://${{site.RAILWAY_PRIVATE_DOMAIN}}:${{site.PORT}}` | Private URL for the site-owned app API. References the site service port. | No |
 | `APP_API_SERVICE_TOKEN` | `${{site.INTERNAL_SERVICE_TOKEN}}` | Internal site service token reference. | No |
-| `OUTPUT_ADAPTER_BASE_URL` | `http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}` | Private URL for output adapter destination lookup and direct message sends from Codex agents. | No |
-| `OUTPUT_ADAPTER_TOKEN` | `${{discord-adapter.SOURCE_ADAPTER_TOKEN}}` | Shared adapter token sent as `X-Adapter-Token` for direct output adapter calls. | No |
+| `COMMUNICATION_ADAPTER_BASE_URL` | `http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}` | Private URL for communication adapter destination lookup and direct message sends from Codex agents. | No |
+| `COMMUNICATION_ADAPTER_TOKEN` | `${{discord-adapter.SOURCE_ADAPTER_TOKEN}}` | Shared adapter token sent as `X-Adapter-Token` for direct communication adapter calls. | No |
+| `PRISM_GATEWAY_ENABLED` | `true` | Enables assigned Gateway connected services and job-scoped compatibility leases. | Yes |
+| `PRISM_GATEWAY_BASE_URL` | `http://${{prism-gateway.RAILWAY_PRIVATE_DOMAIN}}:${{prism-gateway.PORT}}` | Private Gateway URL. | Yes |
+| `PRISM_GATEWAY_TOKEN` | `${{prism-gateway.GATEWAY_CODEX_RUNTIME_TOKEN}}` | Codex Runtime caller token for Gateway. | Yes |
+| `PRISM_RUNTIME_KEY` | `codex-default` | Stable runtime identity associated with Gateway calls. | Yes |
 | `TARGET_REPO_GITHUB_TOKEN` | empty | GitHub token for cloning or pushing private target repositories. | Yes |
 | `GIT_AUTHOR_NAME` | `Prism Codex` | Git author name used for Codex-created commits. | No |
 | `GIT_AUTHOR_EMAIL` | `prism-codex@users.noreply.github.com` | Git author email used for Codex-created commits. | No |
@@ -117,13 +174,14 @@ Use this while filling out the Railway template composer.
 | `TASK_RUNNER_TOKEN` | `${{site.INTERNAL_SERVICE_TOKEN}}` | Token for task-runner health/admin calls. | No |
 | `APP_API_BASE_URL` | `http://${{site.RAILWAY_PRIVATE_DOMAIN}}:${{site.PORT}}` | Private URL for the site-owned app API. References the site service port. | No |
 | `APP_API_SERVICE_TOKEN` | `${{site.INTERNAL_SERVICE_TOKEN}}` | Internal site service token reference. | No |
-| `DISCORD_ADAPTER_BASE_URL` | `http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}` | Private URL for the Discord adapter sync endpoint used by the built-in Discord sync task. | No |
-| `SOURCE_ADAPTER_TOKEN` | `${{discord-adapter.SOURCE_ADAPTER_TOKEN}}` | Shared adapter token sent as `X-Adapter-Token` for Discord sync. | No |
-| `OUTPUT_ADAPTER_BASE_URL` | `http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}` | Private URL for task output destination lookup and message delivery. | No |
-| `OUTPUT_ADAPTER_TOKEN` | `${{discord-adapter.SOURCE_ADAPTER_TOKEN}}` | Shared adapter token sent as `X-Adapter-Token` for task output delivery. | No |
+| `COMMUNICATION_ADAPTER_BASE_URL` | `http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}` | Private URL for built-in communication sync, destination lookup, and task output delivery. | No |
+| `COMMUNICATION_ADAPTER_TOKEN` | `${{discord-adapter.SOURCE_ADAPTER_TOKEN}}` | Shared adapter token sent as `X-Adapter-Token` for task-runner communication adapter calls. | No |
 | `PRISM_MEMORY_BASE_URL` | `http://${{prism-memory.RAILWAY_PRIVATE_DOMAIN}}:${{prism-memory.PORT}}` | Private URL for Prism Memory. References the memory service port. | No |
 | `PRISM_API_KEY` | `${{prism-memory.PRISM_API_KEY}}` | Prism Memory API key reference. | No |
 | `CODEX_RUNTIME_BASE_URL` | `http://${{codex-runtime.RAILWAY_PRIVATE_DOMAIN}}:${{codex-runtime.PORT}}` | Private URL for Codex Runtime. References the runtime service port. | No |
+| `PRISM_GATEWAY_ENABLED` | `true` | Enables job-scoped Gateway credential leases for assigned script-runner tasks. | Yes |
+| `PRISM_GATEWAY_BASE_URL` | `http://${{prism-gateway.RAILWAY_PRIVATE_DOMAIN}}:${{prism-gateway.PORT}}` | Private Gateway URL. | Yes |
+| `PRISM_GATEWAY_TOKEN` | `${{prism-gateway.GATEWAY_TASK_RUNNER_TOKEN}}` | Task Runner caller token for Gateway leases. | Yes |
 
 ## Discord Sync Cron
 

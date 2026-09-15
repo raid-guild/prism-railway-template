@@ -17,7 +17,7 @@ The current entry point is Discord, but the product direction is broader:
 
 - Discord for chat, meetings, and operator workflows
 - Prism Memory for shared memory and knowledge
-- Codex Runtime for operator and agent execution
+- Codex Runtime for operator and agent runs
 - a stack that can be adapted to other transports, tools, and environments
 
 ## Voice

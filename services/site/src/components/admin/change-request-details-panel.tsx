@@ -44,6 +44,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { describeFetchError, readApiError } from "@/lib/client-api-errors";
 import type {
+  AgentRunRecord,
   ChangeRequestExecutionRecord,
   ChangeRequestRecord,
   RequestExternalRefRecord,
@@ -60,6 +61,7 @@ import {
   executionDeployUrl,
   formatDurationFrom,
   githubCompareUrl,
+  humanHoursLabel,
   isoLabel,
   priorityVariant,
   workflowStepForKey,
@@ -71,30 +73,40 @@ import {
 
 function CommandCenter({
   currentWorkflowStepKey,
+  workflowRunStatus,
   steps,
   isPending,
+  isCancelPending,
   isStepRunning,
   isClosed,
   canRunWorkflowActions,
   onContinue,
+  onCancel,
 }: {
   currentWorkflowStepKey: string | null;
+  workflowRunStatus: string | null;
   steps: WorkflowStep[];
   isPending: boolean;
+  isCancelPending: boolean;
   isStepRunning: boolean;
   isClosed: boolean;
   canRunWorkflowActions: boolean;
   onContinue: () => void;
+  onCancel: () => void;
 }) {
   const currentWorkflowPosition = workflowStepForKey(currentWorkflowStepKey, steps);
   const currentStepIndex = currentWorkflowPosition.index;
   const currentStep = currentWorkflowPosition.step;
   const isRunning = isStepRunning;
+  const isCanceled = workflowRunStatus === "canceled";
   const isTerminal = currentStep.type === "terminal" || isClosed;
   const canContinue = canRunWorkflowActions && !isRunning && !isTerminal;
+  const canCancel = canRunWorkflowActions && !isTerminal;
   const actionLabel =
     currentStep.type === "checkpoint"
       ? currentStep.resumeLabel ?? `Check ${currentStep.label}`
+      : currentStep.type === "loop"
+        ? currentStep.resumeLabel ?? `Evaluate ${currentStep.label}`
       : "Continue";
 
   return (
@@ -117,9 +129,9 @@ function CommandCenter({
             }}
           />
           <div
-            className={`absolute top-4 hidden h-px bg-primary md:block ${
+            className={`absolute top-4 hidden h-px md:block ${
               isRunning ? "animate-pulse" : ""
-            }`}
+            } ${isCanceled ? "bg-destructive" : "bg-primary"}`}
             style={{
               left: `calc(100% / ${steps.length * 2})`,
               width:
@@ -131,16 +143,21 @@ function CommandCenter({
             }}
           />
           {steps.map((step, index) => {
-            const isComplete = currentStep.type === "terminal" || currentStepIndex > index;
+            const isComplete = !isCanceled && (currentStep.type === "terminal" || currentStepIndex > index);
             const isCurrent = currentStepIndex === index;
             const isCurrentRunning = isCurrent && isRunning;
+            const isCurrentCanceled = isCurrent && isCanceled;
 
             return (
               <div key={step.key} className="relative flex gap-3 md:block">
                 {index < steps.length - 1 ? (
                   <div
                     className={`absolute left-4 top-8 h-[calc(100%+0.75rem)] w-px md:hidden ${
-                      isComplete ? "bg-primary" : "bg-border"
+                      isCurrentCanceled || (isCanceled && index < currentStepIndex)
+                        ? "bg-destructive"
+                        : isComplete
+                          ? "bg-primary"
+                          : "bg-border"
                     }`}
                   />
                 ) : null}
@@ -150,7 +167,9 @@ function CommandCenter({
                   ) : null}
                   <div
                     className={`relative flex h-8 w-8 items-center justify-center rounded-full border ${
-                      isComplete
+                      isCurrentCanceled
+                        ? "border-destructive bg-destructive text-destructive-foreground shadow-[0_0_0_4px_hsl(var(--destructive)/0.18)]"
+                        : isComplete
                         ? "border-primary bg-primary text-primary-foreground"
                         : isCurrentRunning
                           ? "border-primary bg-primary text-primary-foreground shadow-[0_0_0_4px_hsl(var(--primary)/0.18)]"
@@ -159,7 +178,9 @@ function CommandCenter({
                             : "border-border bg-background text-muted-foreground"
                     }`}
                   >
-                    {isComplete ? (
+                    {isCurrentCanceled ? (
+                      <X className="h-4 w-4" />
+                    ) : isComplete ? (
                       <CheckCircle2 className="h-4 w-4" />
                     ) : isCurrentRunning ? (
                       <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -192,16 +213,21 @@ function CommandCenter({
             <div className="flex flex-wrap items-center gap-2">
               <p className="font-medium">{currentStep.label}</p>
               <Badge variant="outline">{currentStep.type}</Badge>
+              {isCanceled ? <Badge variant="destructive">canceled</Badge> : null}
             </div>
             <p className="mt-1 text-sm leading-6 text-muted-foreground">
               {isClosed
-                ? "This request is closed."
+                ? isCanceled
+                  ? "This request was canceled and moved to a terminal step."
+                  : "This request is closed."
                 : currentStep.type === "agent" && isRunning
                 ? "The agent is running this workflow step."
                 : currentStep.type === "agent"
                   ? "This workflow step is ready for an agent run."
                   : currentStep.type === "checkpoint"
                     ? "This workflow is paused until an operator checks external state."
+                  : currentStep.type === "loop"
+                    ? "This workflow is evaluating structured loop state."
                   : currentStep.type === "gate"
                     ? "This workflow step is waiting for a human decision."
                     : currentStep.type === "terminal"
@@ -214,20 +240,20 @@ function CommandCenter({
               </p>
             ) : null}
           </div>
-          {canContinue && currentStep.type === "agent" ? (
+          {canContinue || canCancel ? (
             <div className="flex flex-wrap justify-end gap-2">
-              <Button type="button" onClick={onContinue} disabled={isPending}>
-                {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
-                {actionLabel}
-              </Button>
-            </div>
-          ) : null}
-          {canContinue && currentStep.type !== "agent" ? (
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button type="button" onClick={onContinue} disabled={isPending}>
-                {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
-                {actionLabel}
-              </Button>
+              {canContinue ? (
+                <Button type="button" onClick={onContinue} disabled={isPending}>
+                  {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
+                  {actionLabel}
+                </Button>
+              ) : null}
+              {canCancel ? (
+                <Button type="button" variant="destructive" onClick={onCancel} disabled={isCancelPending}>
+                  <X className="h-4 w-4" />
+                  Cancel workflow
+                </Button>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -238,7 +264,8 @@ function CommandCenter({
               <p className="font-medium">Step running</p>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
                 Prism is working through the current workflow step. The request
-                will move forward when the run completes.
+                will move forward when the run completes. Canceling the workflow
+                closes the request and marks active runs canceled.
               </p>
             </div>
           </div>
@@ -313,6 +340,154 @@ function hasAutoContinuedFlag(value: { meta?: Record<string, unknown>; payload?:
   return value.meta?.autoContinued === true || value.payload?.autoContinued === true;
 }
 
+function executionAgentRunId(execution: ChangeRequestExecutionRecord) {
+  return stringValue(execution.meta?.agentRunId);
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function agentRunResultString(run: AgentRunRecord | null, key: string) {
+  return stringValue(run?.result?.[key]);
+}
+
+type WorkflowOutcome = {
+  status: "blocked" | "needs_attention" | "completed";
+  summary: string | null;
+  suggestedFix: string | null;
+  blockers: Array<Record<string, unknown>>;
+};
+
+function workflowOutcomeFromRun(run: AgentRunRecord | null): WorkflowOutcome | null {
+  const value = run?.result?.workflowOutcome;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const rawStatus = stringValue(record.status)?.replace(/-/g, "_");
+  if (
+    rawStatus !== "blocked" &&
+    rawStatus !== "needs_attention" &&
+    rawStatus !== "completed"
+  ) {
+    return null;
+  }
+  return {
+    status: rawStatus,
+    summary: stringValue(record.summary),
+    suggestedFix:
+      stringValue(record.suggestedFix) ?? stringValue(record.suggested_fix),
+    blockers: Array.isArray(record.blockers)
+      ? record.blockers.filter(
+          (blocker): blocker is Record<string, unknown> =>
+            Boolean(blocker) && typeof blocker === "object" && !Array.isArray(blocker),
+        )
+      : [],
+  };
+}
+
+function workflowOutcomeNeedsAttention(outcome: WorkflowOutcome | null) {
+  return outcome?.status === "blocked" || outcome?.status === "needs_attention";
+}
+
+function workflowOutcomeLabel(outcome: WorkflowOutcome) {
+  return outcome.status === "blocked" ? "Blocked" : "Needs attention";
+}
+
+function blockerText(blocker: Record<string, unknown>, key: string) {
+  return stringValue(blocker[key]);
+}
+
+function agentRunBranchUrl(run: AgentRunRecord | null) {
+  return agentRunResultString(run, "branchUrl");
+}
+
+function agentRunDeployUrl(
+  run: AgentRunRecord | null,
+  targetEnvironment?: TargetEnvironmentRecord | null,
+) {
+  const direct = agentRunResultString(run, "deployUrl");
+  if (direct) return direct;
+
+  const staticUrl = agentRunResultString(run, "deployStaticUrl");
+  if (staticUrl) return staticUrl.startsWith("http") ? staticUrl : `https://${staticUrl}`;
+
+  const fallback = targetEnvironment?.baseUrl;
+  return stringValue(fallback);
+}
+
+function latestAgentRunTraceEntry(run: AgentRunRecord | null) {
+  const trace = Array.isArray(run?.trace) ? run.trace : [];
+  for (let index = trace.length - 1; index >= 0; index -= 1) {
+    const entry = trace[index];
+    const message = stringValue(entry?.message);
+    if (message) {
+      return {
+        kind: stringValue(entry?.kind) ?? "runtime",
+        message,
+      };
+    }
+  }
+
+  return null;
+}
+
+function describeAgentRunStage(run: AgentRunRecord | null) {
+  if (!run) return "No active agent run";
+
+  if (run.status === "queued") {
+    const parts = [`Queued in ${run.lane} lane`];
+    if (typeof run.queuePosition === "number" && run.queuePosition > 0) {
+      parts.push(`position ${run.queuePosition}`);
+    }
+    if (run.queueReason) {
+      parts.push(run.queueReason);
+    }
+    return parts.join(" · ");
+  }
+
+  const traceEntry = latestAgentRunTraceEntry(run);
+  if (traceEntry) {
+    return `${traceEntry.kind}: ${traceEntry.message}`;
+  }
+
+  const branchName = agentRunResultString(run, "branchName");
+  if (branchName) {
+    return `Working on branch ${branchName}`;
+  }
+
+  return "Agent run started and waiting for runtime updates";
+}
+
+type ResponseJobTraceEntry = {
+  at?: string;
+  kind?: string;
+  message?: string;
+};
+
+type ResponseJobPollError = Error & {
+  transient?: boolean;
+};
+
+const transientJobPollStatuses = new Set([408, 429, 502, 503, 504]);
+
+function workflowJobStorageKey(requestId: string) {
+  return `prism-change-request-workflow-job-${requestId}`;
+}
+
+function createTransientJobPollError(message: string) {
+  const error = new Error(message) as ResponseJobPollError;
+  error.transient = true;
+  return error;
+}
+
+function isTransientJobPollError(error: unknown) {
+  return (
+    error instanceof TypeError && /fetch/i.test(error.message)
+  ) || (
+    error instanceof Error && Boolean((error as ResponseJobPollError).transient)
+  );
+}
+
 function safeExternalHref(value: string) {
   try {
     const parsed = new URL(value);
@@ -352,11 +527,15 @@ export function RequestDetailsPanel({
   const currentWorkflowSteps = useMemo(() => workflowSteps(workflow), [workflow]);
   const [currentWorkflowStepKey, setCurrentWorkflowStepKey] = useState(request.currentWorkflowStepKey);
   const [workflowRunStatus, setWorkflowRunStatus] = useState(request.workflowRunStatus);
+  const [workflowAttention, setWorkflowAttention] = useState(request.workflowAttention);
   const currentWorkflowStep = useMemo(
     () => workflowStepForKey(currentWorkflowStepKey, currentWorkflowSteps).step,
     [currentWorkflowStepKey, currentWorkflowSteps],
   );
-  const isWorkflowClosed = currentWorkflowStep.type === "terminal" || workflowRunStatus === "completed";
+  const isWorkflowClosed =
+    currentWorkflowStep.type === "terminal" ||
+    workflowRunStatus === "completed" ||
+    workflowRunStatus === "canceled";
   const reopenableWorkflowSteps = useMemo(
     () => currentWorkflowSteps.filter((step) => step.type !== "terminal"),
     [currentWorkflowSteps],
@@ -379,15 +558,20 @@ export function RequestDetailsPanel({
     [],
   );
   const [commentDraft, setCommentDraft] = useState("");
+  const threadScrollAreaRef = useRef<HTMLDivElement>(null);
   const artifactUploadInputRef = useRef<HTMLInputElement>(null);
   const [latestUploadedArtifactName, setLatestUploadedArtifactName] = useState<string | null>(null);
   const [isReopenDialogOpen, setIsReopenDialogOpen] = useState(false);
+  const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
   const [reopenStepKey, setReopenStepKey] = useState("");
   const [reopenComment, setReopenComment] = useState("");
+  const [cancelComment, setCancelComment] = useState("Cancel this workflow and close the request.");
+  const [overrideComment, setOverrideComment] = useState("");
   const [threadError, setThreadError] = useState<string | null>(null);
   const [executions, setExecutions] = useState<ChangeRequestExecutionRecord[]>(
     [],
   );
+  const [agentRuns, setAgentRuns] = useState<AgentRunRecord[]>([]);
   const [workflowEvents, setWorkflowEvents] = useState<WorkflowEventRecord[]>(
     [],
   );
@@ -402,12 +586,17 @@ export function RequestDetailsPanel({
   const [isCommentPending, startCommentTransition] = useTransition();
   const [isCommandPending, startCommandTransition] = useTransition();
   const [isReopenPending, startReopenTransition] = useTransition();
+  const [isOverridePending, startOverrideTransition] = useTransition();
   const [isArtifactUploadPending, startArtifactUploadTransition] = useTransition();
   const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
+  const [activeWorkflowJobId, setActiveWorkflowJobId] = useState<string | null>(null);
+  const [workflowJobNotice, setWorkflowJobNotice] = useState<string | null>(null);
+  const [workflowJobTrace, setWorkflowJobTrace] = useState<ResponseJobTraceEntry[]>([]);
 
   useEffect(() => {
     setCurrentWorkflowStepKey(request.currentWorkflowStepKey);
     setWorkflowRunStatus(request.workflowRunStatus);
+    setWorkflowAttention(request.workflowAttention);
     setTriageSummary(request.triageSummary ?? "");
     setAgentRecommendation(request.agentRecommendation ?? "");
     setManualWorkflowStepKey(request.currentWorkflowStepKey ?? "");
@@ -417,6 +606,7 @@ export function RequestDetailsPanel({
     request.currentWorkflowStepKey,
     request.id,
     request.triageSummary,
+    request.workflowAttention,
     request.workflowRunStatus,
   ]);
 
@@ -425,6 +615,9 @@ export function RequestDetailsPanel({
     setReopenComment("");
     setIsReopenDialogOpen(false);
     setLatestUploadedArtifactName(null);
+    setActiveWorkflowJobId(window.localStorage.getItem(workflowJobStorageKey(request.id)));
+    setWorkflowJobNotice(null);
+    setWorkflowJobTrace([]);
   }, [request.id]);
 
   useEffect(() => {
@@ -486,8 +679,10 @@ export function RequestDetailsPanel({
 
   useEffect(() => {
     const shouldPollLiveState =
+      agentRuns.some((run) => run.status === "queued" || run.status === "running") ||
       executions.some((execution) => execution.status === "running") ||
-      isCommandPending;
+      isCommandPending ||
+      Boolean(activeWorkflowJobId);
 
     if (!shouldPollLiveState) {
       return;
@@ -538,7 +733,9 @@ export function RequestDetailsPanel({
           messages?: AgentThreadMessage[];
         };
         const executionPayload = (await executionResponse.json()) as {
+          legacyExecutions?: ChangeRequestExecutionRecord[];
           executions?: ChangeRequestExecutionRecord[];
+          agentRuns?: AgentRunRecord[];
         };
         const workflowEventPayload = (await workflowEventResponse.json()) as {
           events?: WorkflowEventRecord[];
@@ -555,6 +752,7 @@ export function RequestDetailsPanel({
         if (requestPayload.changeRequest) {
           setCurrentWorkflowStepKey(requestPayload.changeRequest.currentWorkflowStepKey);
           setWorkflowRunStatus(requestPayload.changeRequest.workflowRunStatus);
+          setWorkflowAttention(requestPayload.changeRequest.workflowAttention);
           setTriageSummary(requestPayload.changeRequest.triageSummary ?? "");
           setAgentRecommendation(requestPayload.changeRequest.agentRecommendation ?? "");
           setManualWorkflowStepKey(requestPayload.changeRequest.currentWorkflowStepKey ?? "");
@@ -564,8 +762,15 @@ export function RequestDetailsPanel({
           Array.isArray(threadPayload.messages) ? threadPayload.messages : [],
         );
         setExecutions(
-          Array.isArray(executionPayload.executions)
-            ? executionPayload.executions
+          Array.isArray(executionPayload.legacyExecutions)
+            ? executionPayload.legacyExecutions
+            : Array.isArray(executionPayload.executions)
+              ? executionPayload.executions
+              : [],
+        );
+        setAgentRuns(
+          Array.isArray(executionPayload.agentRuns)
+            ? executionPayload.agentRuns
             : [],
         );
         setWorkflowEvents(
@@ -594,12 +799,48 @@ export function RequestDetailsPanel({
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [executions, isCommandPending, request.id]);
+  }, [activeWorkflowJobId, agentRuns, executions, isCommandPending, request.id]);
+
+  useEffect(() => {
+    const scrollArea = threadScrollAreaRef.current;
+    if (!scrollArea) return;
+    const frameId = window.requestAnimationFrame(() => {
+      const viewport = scrollArea.querySelector<HTMLDivElement>(
+        "[data-slot='scroll-area-viewport']",
+      );
+      if (!viewport) return;
+      viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [request.id, threadMessages.length]);
 
   const activeExecution = useMemo(
     () =>
       executions.find((execution) => execution.status === "running") ?? null,
     [executions],
+  );
+  const activeAgentRun = useMemo(
+    () =>
+      agentRuns.find((run) => run.status === "queued" || run.status === "running") ?? null,
+    [agentRuns],
+  );
+  const latestAttentionOutcome = workflowAttention;
+  const legacyOnlyExecutions = useMemo(
+    () => executions.filter((execution) => !executionAgentRunId(execution)),
+    [executions],
+  );
+  const activeRunElapsed = formatDurationFrom(
+    activeAgentRun?.startedAt ?? activeAgentRun?.claimedAt ?? activeAgentRun?.queuedAt ?? activeAgentRun?.createdAt ?? null,
+    liveNowMs,
+  );
+  const activeAgentRunStage = describeAgentRunStage(activeAgentRun);
+  const activeAgentRunBranchName = agentRunResultString(activeAgentRun, "branchName");
+  const activeAgentRunBranchUrl = agentRunBranchUrl(activeAgentRun);
+  const activeAgentRunDeployUrl = agentRunDeployUrl(activeAgentRun, targetEnvironment);
+  const activeAgentRunPrUrl = githubCompareUrl(
+    targetApp,
+    agentRunResultString(activeAgentRun, "baseBranch") ?? configuredBaseBranch,
+    activeAgentRunBranchName,
   );
   const activeExecutionElapsed = formatDurationFrom(
     activeExecution?.startedAt ?? null,
@@ -618,6 +859,9 @@ export function RequestDetailsPanel({
       : null) ?? configuredBaseBranch,
     activeExecution?.branchName ?? null,
   );
+  const visibleWorkflowJobTrace = workflowJobTrace
+    .filter((entry) => entry.message?.trim())
+    .slice(-5);
   const lifecycleEvents = useMemo(
     () =>
       [
@@ -660,7 +904,9 @@ export function RequestDetailsPanel({
 
         const payload = (await response.json()) as {
           ok?: boolean;
+          legacyExecutions?: ChangeRequestExecutionRecord[];
           executions?: ChangeRequestExecutionRecord[];
+          agentRuns?: AgentRunRecord[];
           error?: string;
         };
 
@@ -670,8 +916,13 @@ export function RequestDetailsPanel({
         }
 
         setExecutions(
-          Array.isArray(payload.executions) ? payload.executions : [],
+          Array.isArray(payload.legacyExecutions)
+            ? payload.legacyExecutions
+            : Array.isArray(payload.executions)
+              ? payload.executions
+              : [],
         );
+        setAgentRuns(Array.isArray(payload.agentRuns) ? payload.agentRuns : []);
       } catch (error) {
         if (!cancelled) {
           setThreadError(
@@ -841,9 +1092,18 @@ export function RequestDetailsPanel({
     }
 
     const payload = (await response.json()) as {
+      legacyExecutions?: ChangeRequestExecutionRecord[];
       executions?: ChangeRequestExecutionRecord[];
+      agentRuns?: AgentRunRecord[];
     };
-    setExecutions(Array.isArray(payload.executions) ? payload.executions : []);
+    setExecutions(
+      Array.isArray(payload.legacyExecutions)
+        ? payload.legacyExecutions
+        : Array.isArray(payload.executions)
+          ? payload.executions
+          : [],
+    );
+    setAgentRuns(Array.isArray(payload.agentRuns) ? payload.agentRuns : []);
   }
 
   async function refreshWorkflowEvents() {
@@ -875,6 +1135,112 @@ export function RequestDetailsPanel({
     };
     setArtifacts(Array.isArray(payload.artifacts) ? payload.artifacts : []);
   }
+
+  async function refreshPanelState() {
+    await Promise.all([
+      refreshThread(),
+      refreshExecutions(),
+      refreshWorkflowEvents(),
+      refreshArtifacts(),
+    ]);
+  }
+
+  useEffect(() => {
+    if (!activeWorkflowJobId) return;
+
+    let cancelled = false;
+    let timeoutId: number | null = null;
+    let transientFailureCount = 0;
+
+    async function pollWorkflowJob() {
+      try {
+        const response = await fetch(`/admin/console/jobs/${encodeURIComponent(activeWorkflowJobId!)}`, {
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          if (transientJobPollStatuses.has(response.status)) {
+            throw createTransientJobPollError(`Workflow job poll returned HTTP ${response.status}`);
+          }
+          throw new Error(await readApiError(response, "Could not load workflow job"));
+        }
+
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          job?: {
+            id: string;
+            status: string;
+            sessionId?: string | null;
+            errorMessage?: string | null;
+            trace?: ResponseJobTraceEntry[];
+          };
+        };
+        if (cancelled) return;
+
+        const job = payload.job;
+        if (!job) {
+          throw new Error("Workflow job response did not include a job");
+        }
+
+        transientFailureCount = 0;
+        setWorkflowJobNotice("Workflow step is running. This page can stay open while Prism works.");
+        setWorkflowJobTrace(Array.isArray(job.trace) ? job.trace.slice(-8) : []);
+        if (job.sessionId) {
+          setThreadSession({ id: job.sessionId });
+        }
+
+        if (job.status === "succeeded") {
+          window.localStorage.removeItem(workflowJobStorageKey(request.id));
+          setActiveWorkflowJobId(null);
+          setWorkflowJobTrace([]);
+          setWorkflowJobNotice(null);
+          setThreadError(null);
+          await refreshPanelState();
+          return;
+        }
+
+        if (job.status === "failed" || job.status === "canceled") {
+          window.localStorage.removeItem(workflowJobStorageKey(request.id));
+          setActiveWorkflowJobId(null);
+          setWorkflowJobTrace([]);
+          setWorkflowJobNotice(null);
+          setThreadError(job.errorMessage || `Workflow job ${job.status}`);
+          await refreshPanelState().catch(() => undefined);
+          return;
+        }
+      } catch (pollError) {
+        if (cancelled) return;
+        if (isTransientJobPollError(pollError)) {
+          transientFailureCount += 1;
+          const retryDelayMs = Math.min(15_000, 1500 + transientFailureCount * 1000);
+          setWorkflowJobNotice(
+            transientFailureCount === 1
+              ? "Workflow status connection was interrupted. Prism may still be working; retrying status..."
+              : `Workflow status is still retrying. Next check in ${Math.ceil(retryDelayMs / 1000)} seconds.`,
+          );
+          timeoutId = window.setTimeout(pollWorkflowJob, retryDelayMs);
+          return;
+        }
+
+        window.localStorage.removeItem(workflowJobStorageKey(request.id));
+        setActiveWorkflowJobId(null);
+        setWorkflowJobNotice(null);
+        setThreadError(describeFetchError(pollError, "Could not continue agent"));
+        return;
+      }
+
+      if (!cancelled) {
+        timeoutId = window.setTimeout(pollWorkflowJob, 1500);
+      }
+    }
+
+    void pollWorkflowJob();
+    return () => {
+      cancelled = true;
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [activeWorkflowJobId, request.id]);
 
   async function openArtifactPreview(artifact: RequestArtifactRecord) {
     const requestToken = artifactPreviewRequestRef.current + 1;
@@ -944,9 +1310,8 @@ export function RequestDetailsPanel({
     prompt: string,
     session?: AgentThreadSession | null,
     workflowAction?: string,
-    autoContinueUntilGate = false,
   ) {
-    const response = await fetch("/admin/responses", {
+    const response = await fetch("/admin/console/jobs", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -957,8 +1322,6 @@ export function RequestDetailsPanel({
         linked_change_request_id: request.id,
         linked_target_environment_id: request.targetEnvironmentId,
         workflow_action: workflowAction ?? null,
-        auto_continue_until_gate: autoContinueUntilGate,
-        requested_skills: ["change-request-ops", "target-deploy-ops"],
       }),
     });
 
@@ -968,16 +1331,21 @@ export function RequestDetailsPanel({
 
     const payload = (await response.json().catch(() => null)) as {
       error?: string;
+      jobId?: string;
       session_id?: string;
     } | null;
 
+    if (!payload?.jobId) {
+      throw new Error("Workflow job endpoint did not return jobId");
+    }
     if (payload?.session_id) {
       setThreadSession({ id: payload.session_id });
     }
-    await refreshThread();
-    await refreshExecutions();
-    await refreshWorkflowEvents();
-    await refreshArtifacts();
+    window.localStorage.setItem(workflowJobStorageKey(request.id), payload.jobId);
+    setWorkflowJobTrace([]);
+    setWorkflowJobNotice("Workflow step started. Prism will keep working even if the browser connection drops.");
+    setActiveWorkflowJobId(payload.jobId);
+    await refreshPanelState();
   }
 
   function handleAddComment() {
@@ -1048,17 +1416,16 @@ export function RequestDetailsPanel({
         ? `Most recent comment to consider: ${latestComment}`
         : "No new admin comment was provided; continue from the existing request context and thread history.",
       currentWorkflowStep.type === "gate"
-        ? "This step is a human gate. Treat comments as the gate decision and context, route through the workflow manifest, and continue if there is a next agent step."
+        ? "This step is a human gate. Treat comments as operator context, record the continue event, and move to the normal next workflow step if one exists."
         : currentWorkflowStep.type === "checkpoint"
           ? "This step is a checkpoint. Reconcile existing external state and durable artifacts before doing anything new. Do not start duplicate jobs. If the external state is still waiting, leave the request on this checkpoint and summarize what is pending. If it is ready for the next step, say which step should run next and why."
           : "Use the latest request context and comments, run the current workflow step, update the request state if appropriate, and leave a concise summary comment.",
     ].join("\n");
 
     setThreadError(null);
-    const workflowAction = currentWorkflowStep.type === "gate" ? "approved" : undefined;
     startCommandTransition(async () => {
       try {
-        await runAgent(prompt, null, workflowAction, true);
+        await runAgent(prompt, null, undefined);
       } catch (error) {
         setThreadError(
           describeFetchError(error, "Could not continue agent"),
@@ -1067,9 +1434,98 @@ export function RequestDetailsPanel({
     });
   }
 
+  function handleOverrideAttention() {
+    if (!workflowAttention || !overrideComment.trim()) return;
+    setThreadError(null);
+    startOverrideTransition(async () => {
+      try {
+        const response = await fetch(
+          `/admin/change-requests/${request.id}/workflow/blockers/override`,
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              comment: overrideComment.trim(),
+              blockerKeys: workflowAttention.blockers
+                .map((blocker) => blockerText(blocker, "key"))
+                .filter((key): key is string => Boolean(key)),
+            }),
+          },
+        );
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          error?: string;
+          changeRequest?: ChangeRequestRecord;
+        };
+        if (!response.ok || payload.ok === false) {
+          throw new Error(payload.error || "Could not override blocker");
+        }
+        setOverrideComment("");
+        setWorkflowAttention(payload.changeRequest?.workflowAttention ?? null);
+        if (payload.changeRequest) {
+          setCurrentWorkflowStepKey(payload.changeRequest.currentWorkflowStepKey);
+          setWorkflowRunStatus(payload.changeRequest.workflowRunStatus);
+        }
+        await refreshExecutions();
+        await refreshWorkflowEvents();
+      } catch (error) {
+        setThreadError(error instanceof Error ? error.message : "Could not override blocker");
+      }
+    });
+  }
+
+  function handleOpenCancelWorkflowDialog() {
+    setCancelComment((current) => current || "Cancel this workflow and close the request.");
+    setIsCancelDialogOpen(true);
+  }
+
+  function handleCancelWorkflow() {
+    setThreadError(null);
+    startCommandTransition(async () => {
+      try {
+        const response = await fetch(
+          `/admin/change-requests/${request.id}/workflow/cancel`,
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              comment: cancelComment.trim(),
+            }),
+          },
+        );
+        const payload = (await response.json().catch(() => null)) as {
+          ok?: boolean;
+          error?: string;
+          changeRequest?: ChangeRequestRecord;
+        } | null;
+        if (!response.ok || payload?.ok === false) {
+          throw new Error(payload?.error || "Could not cancel workflow");
+        }
+        if (payload?.changeRequest) {
+          setCurrentWorkflowStepKey(payload.changeRequest.currentWorkflowStepKey);
+          setWorkflowRunStatus(payload.changeRequest.workflowRunStatus);
+          setManualWorkflowStepKey(payload.changeRequest.currentWorkflowStepKey ?? "");
+        }
+        setIsCancelDialogOpen(false);
+        setCancelComment("Cancel this workflow and close the request.");
+        await refreshPanelState();
+      } catch (error) {
+        setThreadError(error instanceof Error ? error.message : "Could not cancel workflow");
+      }
+    });
+  }
+
   function handleSaveManualStatus() {
     const nextStep = currentWorkflowSteps.find((step) => step.key === manualWorkflowStepKey);
     if (!nextStep) return;
+    if (activeAgentRun) {
+      setThreadError("Cancel the active agent run before changing workflow steps.");
+      return;
+    }
     setCurrentWorkflowStepKey(manualWorkflowStepKey || null);
     setIsDraftDirty(false);
     onSave({
@@ -1136,13 +1592,118 @@ export function RequestDetailsPanel({
         <div className="space-y-6">
           <CommandCenter
             currentWorkflowStepKey={currentWorkflowStepKey}
+            workflowRunStatus={workflowRunStatus}
             steps={currentWorkflowSteps}
-            isPending={isPending || isCommandPending}
-            isStepRunning={Boolean(activeExecution)}
+            isPending={isPending || isCommandPending || Boolean(activeWorkflowJobId)}
+            isCancelPending={isCommandPending}
+            isStepRunning={Boolean(activeAgentRun)}
             isClosed={isWorkflowClosed}
             canRunWorkflowActions={canRunWorkflowActions}
             onContinue={handleContinueWorkflow}
+            onCancel={handleOpenCancelWorkflowDialog}
           />
+          {workflowJobNotice ? (
+            <div className="rounded-none border border-border/70 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+              <div>{workflowJobNotice}</div>
+              {visibleWorkflowJobTrace.length > 0 ? (
+                <div className="mt-2 space-y-1 font-mono text-xs">
+                  {visibleWorkflowJobTrace.map((entry, index) => (
+                    <div key={`${entry.at ?? "trace"}-${index}`}>
+                      {entry.message}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {latestAttentionOutcome ? (
+            <div className="rounded-none border border-amber-400/70 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="border-amber-500/70 text-amber-950">
+                    {workflowOutcomeLabel(latestAttentionOutcome)}
+                  </Badge>
+                  {latestAttentionOutcome.workflowStepKey ? (
+                    <span className="font-medium">
+                      {latestAttentionOutcome.workflowStepKey}
+                    </span>
+                  ) : null}
+                </div>
+                <span className="text-xs text-amber-900/75">
+                  Run {latestAttentionOutcome.agentRunId}
+                </span>
+              </div>
+              {latestAttentionOutcome.summary ? (
+                <p className="mt-3 leading-6">{latestAttentionOutcome.summary}</p>
+              ) : null}
+              {latestAttentionOutcome.suggestedFix ? (
+                <p className="mt-2 leading-6">
+                  <span className="font-medium">Suggested fix:</span>{" "}
+                  {latestAttentionOutcome.suggestedFix}
+                </p>
+              ) : null}
+              {latestAttentionOutcome.blockers.length ? (
+                <div className="mt-3 space-y-2">
+                  {latestAttentionOutcome.blockers.map((blocker, index) => {
+                    const key = blockerText(blocker, "key") ?? `blocker-${index + 1}`;
+                    const severity = blockerText(blocker, "severity");
+                    const reason = blockerText(blocker, "reason");
+                    const suggestedFix =
+                      blockerText(blocker, "suggestedFix") ?? blockerText(blocker, "suggested_fix");
+                    return (
+                      <div
+                        key={`${key}-${index}`}
+                        className="rounded-none border border-amber-300/70 bg-amber-100/60 px-3 py-2"
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{key}</span>
+                          {severity ? (
+                            <Badge variant="outline" className="border-amber-500/70 text-amber-950">
+                              {severity}
+                            </Badge>
+                          ) : null}
+                        </div>
+                        {reason ? <p className="mt-1 leading-6">{reason}</p> : null}
+                        {suggestedFix ? (
+                          <p className="mt-1 leading-6">
+                            <span className="font-medium">Fix:</span> {suggestedFix}
+                          </p>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {canRunWorkflowActions ? (
+                <div className="mt-3 space-y-2">
+                  <Label htmlFor="workflow-attention-override">
+                    Override comment
+                  </Label>
+                  <Textarea
+                    id="workflow-attention-override"
+                    value={overrideComment}
+                    onChange={(event) => setOverrideComment(event.target.value)}
+                    placeholder="Explain why it is safe to continue or how you resolved this blocker."
+                    className="min-h-[76px] border-amber-300 bg-amber-50/40"
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleOverrideAttention}
+                      disabled={isOverridePending || !overrideComment.trim()}
+                      className="border-amber-500/70 text-amber-950 hover:bg-amber-100"
+                    >
+                      Continue anyway
+                    </Button>
+                    <span className="text-xs text-amber-900/75">
+                      This records an audit event and clears the current attention state.
+                    </span>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {error || threadError ? (
             <div className="rounded-none border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
               {error ?? threadError}
@@ -1337,6 +1898,45 @@ export function RequestDetailsPanel({
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          <Dialog open={isCancelDialogOpen} onOpenChange={setIsCancelDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Cancel workflow</DialogTitle>
+                <DialogDescription>
+                  This closes the request and cancels any active agent run. Add a note so reviewers know why it was canceled.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-2">
+                <Label htmlFor="cancel-workflow-comment">Cancel note</Label>
+                <Textarea
+                  id="cancel-workflow-comment"
+                  value={cancelComment}
+                  onChange={(event) => setCancelComment(event.target.value)}
+                  placeholder="Explain why this workflow should be canceled."
+                  className="min-h-24"
+                />
+              </div>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsCancelDialogOpen(false)}
+                  disabled={isCommandPending}
+                >
+                  Keep workflow
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={handleCancelWorkflow}
+                  disabled={isCommandPending || !cancelComment.trim()}
+                >
+                  {isCommandPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
+                  Cancel workflow
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
           <Tabs defaultValue="details" className="space-y-4">
             <TabsList className="h-auto flex-wrap rounded-none bg-muted/50 p-1">
               <TabsTrigger value="details">Details</TabsTrigger>
@@ -1371,6 +1971,14 @@ export function RequestDetailsPanel({
                     Priority
                   </p>
                   <p className="mt-2 font-medium">{request.priority}</p>
+                </div>
+                <div className="rounded-none border border-border/70 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                    Human Estimate
+                  </p>
+                  <p className="mt-2 font-medium">
+                    {humanHoursLabel(request.estimatedHumanHours) ?? "Not estimated"}
+                  </p>
                 </div>
                 <div className="rounded-none border border-border/70 p-4">
                   <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
@@ -1561,12 +2169,87 @@ export function RequestDetailsPanel({
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {activeExecution ? (
+              {activeAgentRun ? (
                 <div className="rounded-none border border-sky-200/70 bg-sky-50/80 p-4 text-sm text-sky-950">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
                       <LoaderCircle className="h-4 w-4 animate-spin" />
-                      <span className="font-medium">Current Run</span>
+                      <span className="font-medium">Agent run {activeAgentRun.status}</span>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <Badge variant="outline">{activeAgentRun.kind}</Badge>
+                      <Badge variant="secondary">{activeAgentRun.lane}</Badge>
+                      {activeAgentRun.status === "queued" && activeAgentRun.queuePosition ? (
+                        <Badge variant="outline">position {activeAgentRun.queuePosition}</Badge>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    <p className="leading-6">{activeAgentRunStage}</p>
+                    <div className="grid gap-1 text-xs text-sky-900/75">
+                      {activeAgentRun.workflowStepKey ? (
+                        <div>Step: {activeAgentRun.workflowStepKey}</div>
+                      ) : null}
+                      <div>Lane: {activeAgentRun.lane}</div>
+                      <div>Priority: {activeAgentRun.priority}</div>
+                      {activeAgentRun.queueReason ? <div>Reason: {activeAgentRun.queueReason}</div> : null}
+                      {activeAgentRun.queuedAt ? <div>Queued: {isoLabel(activeAgentRun.queuedAt)}</div> : null}
+                      {activeAgentRun.claimedAt ? <div>Claimed: {isoLabel(activeAgentRun.claimedAt)}</div> : null}
+                      {activeRunElapsed ? <div>Elapsed: {activeRunElapsed}</div> : null}
+                      <div>Run: {activeAgentRun.id}</div>
+                      {activeAgentRunBranchName ? (
+                        <div>
+                          Branch:{" "}
+                          {activeAgentRunBranchUrl ? (
+                            <a
+                              href={activeAgentRunBranchUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="font-medium underline underline-offset-2"
+                            >
+                              {activeAgentRunBranchName}
+                            </a>
+                          ) : (
+                            activeAgentRunBranchName
+                          )}
+                        </div>
+                      ) : null}
+                      {activeAgentRunPrUrl ? (
+                        <div>
+                          PR:{" "}
+                          <a
+                            href={activeAgentRunPrUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-medium underline underline-offset-2"
+                          >
+                            Open compare / PR
+                          </a>
+                        </div>
+                      ) : null}
+                      {activeAgentRunDeployUrl ? (
+                        <div>
+                          Preview:{" "}
+                          <a
+                            href={activeAgentRunDeployUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-medium underline underline-offset-2"
+                          >
+                            {activeAgentRunDeployUrl}
+                          </a>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+              {!activeAgentRun && activeExecution ? (
+                <div className="rounded-none border border-sky-200/70 bg-sky-50/80 p-4 text-sm text-sky-950">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                      <span className="font-medium">Legacy Execution Record</span>
                     </div>
                     <Badge variant="outline">{activeExecution.status}</Badge>
                   </div>
@@ -1632,7 +2315,10 @@ export function RequestDetailsPanel({
                 </div>
               ) : null}
 
-              <ScrollArea className="h-[320px] min-h-0 rounded-none border border-border/70 bg-background/70 p-4">
+              <ScrollArea
+                ref={threadScrollAreaRef}
+                className="h-[320px] min-h-0 rounded-none border border-border/70 bg-background/70 p-4"
+              >
                 <div className="space-y-3">
                   {threadMessages.length ? (
                     threadMessages.map((message) => (
@@ -1768,8 +2454,144 @@ export function RequestDetailsPanel({
             <CardContent>
               <ScrollArea className="h-[420px] max-h-[calc(100vh-430px)] min-h-[240px]">
                 <div className="space-y-3">
-                  {executions.length ? (
-                    executions.map((execution) => (
+                  {agentRuns.length ? (
+                    agentRuns.map((run) => {
+                      const branchName = agentRunResultString(run, "branchName");
+                      const branchUrl = agentRunBranchUrl(run);
+                      const baseBranch =
+                        agentRunResultString(run, "baseBranch") ?? configuredBaseBranch;
+                      const compareUrl = githubCompareUrl(targetApp, baseBranch, branchName);
+                      const commitSha =
+                        agentRunResultString(run, "commitSha") ??
+                        agentRunResultString(run, "headCommitSha");
+                      const deployUrl = agentRunDeployUrl(run, targetEnvironment);
+                      const workflowOutcome = workflowOutcomeFromRun(run);
+
+                      return (
+                        <div
+                          key={run.id}
+                          className="rounded-none border border-primary/25 bg-primary/5 p-4 text-sm"
+                        >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge
+                              variant={
+                                run.status === "succeeded"
+                                  ? "secondary"
+                                  : run.status === "running" || run.status === "queued"
+                                    ? "default"
+                                    : "outline"
+                              }
+                            >
+                              {run.status}
+                            </Badge>
+                            <Badge variant="outline">{run.kind}</Badge>
+                            <Badge variant="secondary">{run.lane}</Badge>
+                            {run.workflowStepKey ? (
+                              <Badge variant="secondary">{run.workflowStepKey}</Badge>
+                            ) : null}
+                            {run.status === "queued" && run.queuePosition ? (
+                              <Badge variant="outline">position {run.queuePosition}</Badge>
+                            ) : null}
+                            {workflowOutcomeNeedsAttention(workflowOutcome) && workflowOutcome ? (
+                              <Badge variant="outline" className="border-amber-500/70 text-amber-700">
+                                {workflowOutcomeLabel(workflowOutcome)}
+                              </Badge>
+                            ) : null}
+                            <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                              agent run
+                            </span>
+                          </div>
+                          <span className="text-xs text-muted-foreground">
+                            {isoLabel(run.updatedAt) ?? ""}
+                          </span>
+                        </div>
+                        {run.errorMessage ? (
+                          <div className="mt-3 rounded-none border border-destructive/30 bg-destructive/5 px-3 py-2 text-destructive">
+                            {run.errorMessage}
+                          </div>
+                        ) : null}
+                        {workflowOutcomeNeedsAttention(workflowOutcome) && workflowOutcome ? (
+                          <div className="mt-3 rounded-none border border-amber-400/70 bg-amber-50/80 px-3 py-2 text-amber-950">
+                            <div className="font-medium">{workflowOutcomeLabel(workflowOutcome)}</div>
+                            {workflowOutcome.summary ? (
+                              <p className="mt-1 whitespace-pre-wrap leading-6">{workflowOutcome.summary}</p>
+                            ) : null}
+                            {workflowOutcome.suggestedFix ? (
+                              <p className="mt-1 whitespace-pre-wrap leading-6">
+                                <span className="font-medium">Suggested fix:</span>{" "}
+                                {workflowOutcome.suggestedFix}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        <div className="mt-3 grid gap-2 text-xs text-muted-foreground">
+                          <div>Run: {run.id}</div>
+                          <div>Lane: {run.lane}</div>
+                          <div>Priority: {run.priority}</div>
+                          {run.queueReason ? <div>Queue reason: {run.queueReason}</div> : null}
+                          {run.idempotencyKey ? <div>Key: {run.idempotencyKey}</div> : null}
+                          {branchName ? (
+                            <div>
+                              Branch:{" "}
+                              {branchUrl ? (
+                                <a
+                                  href={branchUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="font-medium underline underline-offset-2"
+                                >
+                                  {branchName}
+                                </a>
+                              ) : (
+                                branchName
+                              )}
+                            </div>
+                          ) : null}
+                          {compareUrl ? (
+                            <div>
+                              PR:{" "}
+                              <a
+                                href={compareUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="font-medium underline underline-offset-2"
+                              >
+                                Open compare / PR
+                              </a>
+                            </div>
+                          ) : null}
+                          {commitSha ? <div>Commit: {commitSha}</div> : null}
+                          {deployUrl ? (
+                            <div>
+                              Preview:{" "}
+                              <a
+                                href={deployUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="font-medium underline underline-offset-2"
+                              >
+                                {deployUrl}
+                              </a>
+                            </div>
+                          ) : null}
+                          {run.queuedAt ? <div>Queued: {isoLabel(run.queuedAt)}</div> : null}
+                          {run.claimedAt ? <div>Claimed: {isoLabel(run.claimedAt)}</div> : null}
+                          {run.leaseExpiresAt ? <div>Lease expires: {isoLabel(run.leaseExpiresAt)}</div> : null}
+                          {run.startedAt ? <div>Started: {isoLabel(run.startedAt)}</div> : null}
+                          {run.finishedAt ? <div>Finished: {isoLabel(run.finishedAt)}</div> : null}
+                        </div>
+                        {run.trace.length ? (
+                          <pre className="mt-3 max-h-32 overflow-auto rounded-none border border-border/60 bg-muted/30 p-3 text-xs leading-5 text-muted-foreground">
+                            {JSON.stringify(run.trace.slice(-5), null, 2)}
+                          </pre>
+                        ) : null}
+                        </div>
+                      );
+                    })
+                  ) : null}
+                  {legacyOnlyExecutions.length ? (
+                    legacyOnlyExecutions.map((execution) => (
                       <div
                         key={execution.id}
                         className="rounded-none border border-border/70 bg-background/70 p-4 text-sm"
@@ -1791,7 +2613,7 @@ export function RequestDetailsPanel({
                               <Badge variant="outline">auto</Badge>
                             ) : null}
                             <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                              {execution.actorType}
+                              legacy execution · {execution.actorType}
                             </span>
                           </div>
                           <span className="text-xs text-muted-foreground">
@@ -1932,11 +2754,11 @@ export function RequestDetailsPanel({
                         ) : null}
                       </div>
                     ))
-                  ) : (
+                  ) : !agentRuns.length ? (
                     <div className="rounded-none border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-                      No execution records yet for this request.
+                      No agent runs or legacy execution records yet for this request.
                     </div>
-                  )}
+                  ) : null}
                 </div>
               </ScrollArea>
             </CardContent>

@@ -5,6 +5,7 @@ export type RoleSlug = (typeof roleSlugs)[number]
 export const capabilities = [
   "canViewWorkspace",
   "canViewMemory",
+  "canChatAgents",
   "canViewRequests",
   "canCreateRequest",
   "canComment",
@@ -24,6 +25,7 @@ const roleCapabilities: Record<RoleSlug, Capability[]> = {
   moderator: [
     "canViewWorkspace",
     "canViewMemory",
+    "canChatAgents",
     "canViewRequests",
     "canCreateRequest",
     "canComment",
@@ -36,6 +38,7 @@ const roleCapabilities: Record<RoleSlug, Capability[]> = {
   member: [
     "canViewWorkspace",
     "canViewMemory",
+    "canChatAgents",
     "canViewRequests",
     "canCreateRequest",
     "canComment",

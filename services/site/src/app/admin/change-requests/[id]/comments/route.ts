@@ -3,6 +3,7 @@ import {
   createAgentMessage,
   createAgentSession,
   getChangeRequest,
+  getSessionSummary,
   listAgentMessages,
   findLatestAgentSessionByChangeRequest,
   updateAgentSession,
@@ -42,6 +43,7 @@ export async function POST(request: Request, context: RouteContext) {
     if (!changeRequest) {
       return NextResponse.json({ ok: false, error: "Change request not found" }, { status: 404 })
     }
+    const actor = access.userId ? getSessionSummary(access.userId) : null
 
     const body = payload as Record<string, unknown>
     const content = parseString(body.content)
@@ -57,7 +59,7 @@ export async function POST(request: Request, context: RouteContext) {
         title: changeRequest.title,
         linkedChangeRequestId: changeRequest.id,
         linkedTargetEnvironmentId: changeRequest.targetEnvironmentId,
-        createdByUserId: null,
+        createdByUserId: access.userId,
         meta: {
           transport: "site",
         },
@@ -78,6 +80,9 @@ export async function POST(request: Request, context: RouteContext) {
       meta: {
         transport: "site",
         kind: "comment",
+        actorUserId: access.userId,
+        actorDisplayName: actor?.displayName ?? actor?.handle ?? actor?.email ?? null,
+        actorHandle: actor?.handle ?? null,
       },
     })
 

@@ -15,6 +15,7 @@ from .custom_collectors import CollectorLoadError, CommandCollector, load_python
 from .digest import DigestGenerator
 from .github_backup import GitHubBackup, GitHubEnv
 from .memory import RollingMemoryBuilder
+from .objective_state import ObjectiveStateBuilder
 from .project_state import ProjectStateBuilder
 from .seeds import SeedBuilder
 from .state_manager import StateManager
@@ -114,6 +115,7 @@ def build_pipeline(base_path: Path) -> dict:
     digest = DigestGenerator(base_path=base_path, config=config, activity=activity)
     memory_builder = RollingMemoryBuilder(base_path=base_path, activity=activity, config=config)
     project_state = ProjectStateBuilder(base_path=base_path, activity=activity, config=config)
+    objective_state = ObjectiveStateBuilder(base_path=base_path, activity=activity, config=config)
     seeds = SeedBuilder(base_path=base_path, activity=activity)
 
     pipeline = {
@@ -124,6 +126,7 @@ def build_pipeline(base_path: Path) -> dict:
         "digest": digest,
         "memory": memory_builder,
         "project_state": project_state,
+        "objective_state": objective_state,
         "seeds": seeds,
         "base_path": base_path,
     }
@@ -176,15 +179,44 @@ def run_digests(pipeline: dict, target_date: date, force: bool = False) -> None:
 
 
 def run_memory(pipeline: dict, target_date: date, force: bool = False) -> None:
+    run_state(pipeline, target_date, force=force)
     _log(f"running rolling memory for {target_date} (force={force})")
     output = pipeline["memory"].run(target_date, force=force)
     if output:
         _log(f"memory updated: {output}")
     else:
         _log("memory step skipped (already up to date or no digests)")
+
+
+def run_state(pipeline: dict, target_date: date, force: bool = False) -> None:
+    _log(f"running state builders for {target_date} (force={force})")
     state_output = pipeline["project_state"].run(target_date, force=force)
     if state_output:
         _log(f"project state updated: {state_output}")
+    objective_output = pipeline["objective_state"].run(target_date, force=force)
+    if objective_output:
+        _log(f"objective state updated: {objective_output}")
+
+
+def run_state_range(
+    pipeline: dict,
+    start_date: date,
+    end_date: date,
+    force: bool = False,
+) -> None:
+    _log(f"running state builders for {start_date}..{end_date} (force={force})")
+    # Project state remains single-day for now; objective state is range-aware.
+    state_output = pipeline["project_state"].run(end_date, force=force)
+    if state_output:
+        _log(f"project state updated: {state_output}")
+    objective_output = pipeline["objective_state"].run_range(
+        start_date,
+        end_date,
+        force=force,
+        mode="bounded_backfill" if start_date != end_date else "forward",
+    )
+    if objective_output:
+        _log(f"objective state updated: {objective_output}")
 
 
 def run_seeds(pipeline: dict, target_date: date, force: bool = False) -> None:
@@ -246,7 +278,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Community memory pipeline controller")
     parser.add_argument(
         "command",
-        choices=["collect", "digest", "memory", "seeds", "backup", "run"],
+        choices=["collect", "digest", "memory", "state", "seeds", "backup", "run"],
     )
     parser.add_argument(
         "--base",
@@ -255,6 +287,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--space", default=None, help="Space slug (defaults to config)")
     parser.add_argument("--date", help="Target date YYYY-MM-DD", default=None)
+    parser.add_argument("--from-date", help="Start date YYYY-MM-DD for state backfill", default=None)
+    parser.add_argument("--to-date", help="End date YYYY-MM-DD for state backfill", default=None)
     parser.add_argument("--backfill-hours", type=int, default=None, help="Override collector backfill window (hours)")
     parser.add_argument("--force", action="store_true")
     return parser
@@ -283,6 +317,13 @@ def main() -> None:
             run_digests(pipeline, target_date, force=args.force)
         elif args.command == "memory":
             run_memory(pipeline, target_date, force=args.force)
+        elif args.command == "state":
+            if args.from_date or args.to_date:
+                start_date = date.fromisoformat(args.from_date) if args.from_date else target_date
+                end_date = date.fromisoformat(args.to_date) if args.to_date else target_date
+                run_state_range(pipeline, start_date, end_date, force=args.force)
+            else:
+                run_state(pipeline, target_date, force=args.force)
         elif args.command == "seeds":
             run_seeds(pipeline, target_date, force=args.force)
         elif args.command == "backup":

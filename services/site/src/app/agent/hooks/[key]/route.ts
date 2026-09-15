@@ -40,6 +40,10 @@ export async function PATCH(request: Request, context: RouteContext) {
       enabled: body?.enabled === undefined ? existing.enabled : parseBoolean(body.enabled),
       workflowKey: parseString(body?.workflowKey ?? body?.workflow_key) || existing.workflowKey,
       authMode: parseString(body?.authMode ?? body?.auth_mode) || existing.authMode,
+      authConfig:
+        body?.authConfig !== undefined || body?.auth_config !== undefined
+          ? parseConfig(body.authConfig ?? body.auth_config)
+          : existing.authConfig,
       requestTemplate:
         body?.requestTemplate !== undefined || body?.request_template !== undefined
           ? parseConfig(body.requestTemplate ?? body.request_template)

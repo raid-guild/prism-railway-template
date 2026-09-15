@@ -8,6 +8,7 @@ import {
   trackedChangeRequestTypes,
   useLocalAppApi,
 } from "@/lib/local-admin-api"
+import { parseEstimatedHumanHours } from "@/lib/request-estimates"
 import { autoStartWorkflowRequest } from "@/lib/workflow-autostart"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -22,6 +23,9 @@ export async function POST(request: Request) {
   const priority = String(formData.get("priority") ?? "normal").trim()
   const targetAppId = String(formData.get("targetAppId") ?? "").trim()
   const workflowKey = String(formData.get("workflowKey") ?? "change-request-default").trim() || "change-request-default"
+  const rawEstimatedHumanHours = formData.get("estimatedHumanHours") ?? formData.get("estimated_human_hours")
+  const hasEstimatedHumanHours = rawEstimatedHumanHours !== null
+  const estimatedHumanHours = parseEstimatedHumanHours(rawEstimatedHumanHours)
 
   if (useLocalAppApi()) {
     const access = await requireLocalAdminAccess()
@@ -43,7 +47,8 @@ export async function POST(request: Request) {
       (targetRequired && !targetAppId) ||
       (targetAppId && (!targetApp || !targetApp.agentEnabled)) ||
       !trackedChangeRequestTypes.includes(requestType as typeof trackedChangeRequestTypes[number]) ||
-      !trackedChangeRequestPriorities.includes(priority as typeof trackedChangeRequestPriorities[number])
+      !trackedChangeRequestPriorities.includes(priority as typeof trackedChangeRequestPriorities[number]) ||
+      (hasEstimatedHumanHours && estimatedHumanHours === undefined)
     ) {
       redirect("/admin?error=request-create")
     }
@@ -55,16 +60,17 @@ export async function POST(request: Request) {
       requestType,
       priority,
       source: "manual",
-      requestedByUserId: null,
+      requestedByUserId: access.userId,
       targetAppId: targetAppId || null,
       targetEnvironmentId: targetAppId ? getDefaultTargetEnvironmentForApp(targetAppId)?.id ?? null : null,
+      estimatedHumanHours: estimatedHumanHours ?? null,
       acceptanceCriteria: [],
       constraints: {},
       attachments: [],
     })
 
     createAuditLog({
-      actorUserId: null,
+      actorUserId: access.userId,
       actionType: "admin.change_board_request.create",
       targetType: "change_request",
       targetId: changeRequest?.id ?? null,
@@ -96,6 +102,7 @@ export async function POST(request: Request) {
       priority,
       workflowKey,
       targetAppId: targetAppId || null,
+      estimatedHumanHours: estimatedHumanHours ?? null,
     }),
   })
 

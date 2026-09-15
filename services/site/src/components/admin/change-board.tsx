@@ -2,11 +2,15 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
+  ArrowUpCircle,
   BotMessageSquare,
   BookOpen,
   CalendarClock,
+  Mic,
   FilePlus,
+  LoaderCircle,
   LogOut,
   Search,
   Rows3,
@@ -20,6 +24,7 @@ import { AdminHeader } from "@/components/admin/admin-header";
 import { AdminSettingsWorkspace } from "@/components/admin/admin-settings-workspace";
 import { ChangeRequestList } from "@/components/admin/change-request-list";
 import { RequestDetailsPanel } from "@/components/admin/change-request-details-panel";
+import { CaptureWorkspace } from "@/components/admin/capture-workspace";
 import { CodexConsole } from "@/components/admin/codex-console";
 import { HooksWorkspace } from "@/components/admin/hooks-workspace";
 import { NewChangeRequestDialog } from "@/components/admin/new-change-request-dialog";
@@ -39,6 +44,7 @@ import type { Capability } from "@/lib/role-access";
 
 import {
   environmentForRequest,
+  humanHoursLabel,
   parseTimestamp,
   priorityVariant,
   requestSourceLabel,
@@ -50,9 +56,12 @@ import {
   type RequestSortValue,
 } from "./change-request-utils";
 
+const codexConsoleSessionControlsId = "codex-console-session-controls";
+
 const workspaceTabs = [
   "requests",
   "codex-console",
+  "capture",
   "tasks",
   "skills",
   "workflows",
@@ -71,14 +80,17 @@ export function ChangeBoard({
   data: AdminWorkspaceData;
   initialTab?: string;
 }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [data, setData] = useState(initialData);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(
     null,
   );
   const [isNewRequestOpen, setIsNewRequestOpen] = useState(false);
-  const [lifecycleFilter, setLifecycleFilter] = useState("all");
+  const [lifecycleFilter, setLifecycleFilter] = useState("open");
   const [typeFilter, setTypeFilter] = useState("all");
   const [repositoryFilter, setRepositoryFilter] = useState("all");
+  const [stepFilters, setStepFilters] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortValue, setSortValue] = useState<RequestSortValue>("updated-desc");
   const [activeTab, setActiveTab] = useState(() =>
@@ -90,6 +102,23 @@ export function ChangeBoard({
   );
   const [isSaving, startSaving] = useTransition();
   const [modalError, setModalError] = useState<string | null>(null);
+
+  function updateAdminUrl(next: {
+    tab?: string;
+    request?: ChangeRequestRecord | null;
+  }) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (next.tab) {
+      params.set("tab", next.tab);
+    }
+    if (next.request === null) {
+      params.delete("request");
+    } else if (next.request) {
+      params.set("request", String(next.request.requestNumber));
+    }
+    const query = params.toString();
+    router.replace(query ? `/admin?${query}` : "/admin", { scroll: false });
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -109,6 +138,7 @@ export function ChangeBoard({
           setData((current) => ({
             ...payload.data,
             setup: current.setup,
+            updateStatus: current.updateStatus,
             branding: current.branding,
             session: current.session,
           }));
@@ -145,6 +175,33 @@ export function ChangeBoard({
     (request) => workflowStepForRequest(request).type === "terminal",
   ).length;
   const activeCount = data.changeRequests.length - closedCount;
+  const estimatedHumanHours = data.changeRequests.reduce(
+    (totals, request) => {
+      const estimate =
+        typeof request.estimatedHumanHours === "number" &&
+        Number.isFinite(request.estimatedHumanHours)
+          ? request.estimatedHumanHours
+          : 0;
+      totals.total += estimate;
+      if (workflowStepForRequest(request).type !== "terminal") {
+        totals.active += estimate;
+      }
+      return totals;
+    },
+    { active: 0, total: 0 },
+  );
+  const estimatedHumanHoursActiveLabel = humanHoursLabel(
+    estimatedHumanHours.active,
+  );
+  const estimatedHumanHoursTotalLabel = humanHoursLabel(
+    estimatedHumanHours.total,
+  );
+  const runningCount = data.changeRequests.filter(
+    (request) => request.workflowRunStatus === "running",
+  ).length;
+  const attentionCount = data.changeRequests.filter(
+    (request) => Boolean(request.workflowAttention),
+  ).length;
 
   const selectedRequest = useMemo(
     () =>
@@ -167,6 +224,9 @@ export function ChangeBoard({
         workflowSteps(selectedWorkflow),
       ).step
     : null;
+  const selectedEstimatedHumanHoursLabel = selectedRequest
+    ? humanHoursLabel(selectedRequest.estimatedHumanHours)
+    : null;
 
   const requestTypeOptions = useMemo(
     () =>
@@ -175,6 +235,46 @@ export function ChangeBoard({
       ).sort((left, right) => left.localeCompare(right)),
     [data.changeRequests],
   );
+
+  const workflowStepOptions = useMemo(() => {
+    const options = new Map<string, { key: string; label: string }>();
+    for (const request of data.changeRequests) {
+      const step = workflowStepForRequest(request);
+      options.set(step.key, { key: step.key, label: step.label });
+    }
+    return Array.from(options.values()).sort((left, right) =>
+      left.label.localeCompare(right.label),
+    );
+  }, [data.changeRequests, workflowByKey]);
+
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    const requestParam = searchParams.get("request");
+    const nextTab =
+      tabParam && workspaceTabs.includes(tabParam)
+        ? tabParam
+        : tabParam === "change-requests"
+          ? "requests"
+          : "requests";
+
+    if (nextTab !== activeTab) {
+      setActiveTab(nextTab);
+    }
+
+    if (requestParam) {
+      const nextRequest =
+        data.changeRequests.find(
+          (request) =>
+            request.id === requestParam ||
+            String(request.requestNumber) === requestParam,
+        ) ?? null;
+      if (nextRequest && nextRequest.id !== selectedRequestId) {
+        setSelectedRequestId(nextRequest.id);
+      }
+    } else if (selectedRequestId) {
+      setSelectedRequestId(null);
+    }
+  }, [activeTab, data.changeRequests, searchParams, selectedRequestId]);
 
   async function refreshOnce() {
     const response = await fetch("/admin/board", { cache: "no-store" });
@@ -193,6 +293,7 @@ export function ChangeBoard({
     setData((current) => ({
       ...payload.data,
       setup: current.setup,
+      updateStatus: current.updateStatus,
       branding: current.branding,
       session: current.session,
     }));
@@ -255,7 +356,8 @@ export function ChangeBoard({
         const workflowStep = workflowStepForRequest(request);
         const isClosed =
           workflowStep.type === "terminal" ||
-          request.workflowRunStatus === "completed";
+          request.workflowRunStatus === "completed" ||
+          request.workflowRunStatus === "canceled";
         const needsReview = !isClosed && workflowStep.type === "gate";
         if (lifecycleFilter === "open" && isClosed) {
           return false;
@@ -268,6 +370,10 @@ export function ChangeBoard({
         }
 
         if (typeFilter !== "all" && request.requestType !== typeFilter) {
+          return false;
+        }
+
+        if (stepFilters.length && !stepFilters.includes(workflowStep.key)) {
           return false;
         }
 
@@ -311,6 +417,7 @@ export function ChangeBoard({
     searchQuery,
     sortValue,
     lifecycleFilter,
+    stepFilters,
     typeFilter,
     workflowByKey,
   ]);
@@ -326,6 +433,7 @@ export function ChangeBoard({
     () =>
       workspaceTabs.filter((tab) => {
         if (tab === "codex-console") return canRunAgent;
+        if (tab === "capture") return canRunAgent;
         if (tab === "tasks") return canManageTasks;
         if (tab === "skills") return canManageSkills;
         if (tab === "workflows") return canManageWorkflows;
@@ -375,16 +483,52 @@ export function ChangeBoard({
             <form action="/admin/logout" method="post">
               <Button variant="outline" type="submit">
                 <LogOut className="h-4 w-4" />
-                <span className="hidden sm:inline">Exit admin</span>
+                <span className="hidden sm:inline">Logout</span>
               </Button>
             </form>
           </>
         }
       />
 
+      {data.updateStatus.state === "update_available" ? (
+        <div className="border-b border-amber-300 bg-amber-50 px-5 py-3 text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100 md:px-6">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="flex items-center gap-2 text-sm font-medium">
+              <ArrowUpCircle className="h-4 w-4 shrink-0" />
+              {data.updateStatus.updateReason === "version"
+                ? `Prism ${data.updateStatus.latestVersion} is available.`
+                : "A newer Prism build is available."}{" "}
+              This instance is running {data.updateStatus.currentVersion}.
+            </p>
+            <div className="flex items-center gap-3 text-sm">
+              <Link
+                href="/admin?tab=settings&settings=status"
+                className="font-medium underline underline-offset-4"
+              >
+                Version details
+              </Link>
+              <a
+                href={data.updateStatus.changesUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium underline underline-offset-4"
+              >
+                View changes
+              </a>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <Tabs
         value={activeTab}
-        onValueChange={setActiveTab}
+        onValueChange={(nextTab) => {
+          setActiveTab(nextTab);
+          updateAdminUrl({
+            tab: nextTab,
+            request: nextTab === "requests" ? selectedRequest : null,
+          });
+        }}
         className="flex min-h-[calc(100vh-65px)] flex-col"
       >
         <div className="sticky top-16 z-20 border-b border-border/60 bg-background/95 backdrop-blur">
@@ -407,6 +551,15 @@ export function ChangeBoard({
                 >
                   <BotMessageSquare className="h-4 w-4 md:hidden" />
                   <span className="hidden md:inline">Prism Console</span>
+                </TabsTrigger>
+              ) : null}
+              {canRunAgent ? (
+                <TabsTrigger
+                  value="capture"
+                  className="rounded-xl border border-transparent px-4 py-2.5 data-[state=active]:border-border/70 data-[state=active]:bg-background"
+                >
+                  <Mic className="h-4 w-4 md:hidden" />
+                  <span className="hidden md:inline">Capture</span>
                 </TabsTrigger>
               ) : null}
               {canManageTasks ? (
@@ -455,6 +608,13 @@ export function ChangeBoard({
                 </TabsTrigger>
               ) : null}
             </TabsList>
+            {runningCount ? (
+              <div className="mt-3 inline-flex items-center gap-2 border border-primary/40 bg-primary/10 px-3 py-1.5 text-sm text-primary">
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+                Prism is working on {runningCount} request
+                {runningCount === 1 ? "" : "s"}
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -494,6 +654,11 @@ export function ChangeBoard({
                       <Badge variant="outline">
                         {requestSourceLabel(selectedRequest.source)}
                       </Badge>
+                      {selectedEstimatedHumanHoursLabel ? (
+                        <Badge variant="outline">
+                          {selectedEstimatedHumanHoursLabel}
+                        </Badge>
+                      ) : null}
                       <span className="text-sm text-muted-foreground">
                         {selectedTargetApp?.name ??
                           selectedRequest.targetAppSlug ??
@@ -517,6 +682,7 @@ export function ChangeBoard({
                     onClick={() => {
                       setSelectedRequestId(null);
                       setModalError(null);
+                      updateAdminUrl({ tab: "requests", request: null });
                     }}
                   >
                     <X className="h-4 w-4" />
@@ -557,16 +723,20 @@ export function ChangeBoard({
                   lifecycleFilter={lifecycleFilter}
                   typeFilter={typeFilter}
                   repositoryFilter={repositoryFilter}
+                  stepFilters={stepFilters}
+                  workflowStepOptions={workflowStepOptions}
                   searchQuery={searchQuery}
                   sortValue={sortValue}
                   onLifecycleFilterChange={setLifecycleFilter}
                   onTypeFilterChange={setTypeFilter}
                   onRepositoryFilterChange={setRepositoryFilter}
+                  onStepFiltersChange={setStepFilters}
                   onSearchQueryChange={setSearchQuery}
                   onSortValueChange={setSortValue}
                   onOpenRequest={(nextRequest) => {
                     setSelectedRequestId(nextRequest.id);
                     setModalError(null);
+                    updateAdminUrl({ tab: "requests", request: nextRequest });
                   }}
                 />
               )}
@@ -593,6 +763,24 @@ export function ChangeBoard({
                     </p>
                     <p className="mt-2 text-3xl font-semibold">{closedCount}</p>
                   </div>
+                  <div className="rounded-2xl border border-amber-400/70 bg-amber-50/80 p-4 text-amber-950">
+                    <p className="text-xs uppercase tracking-[0.16em] text-amber-900/75">
+                      Needs Attention
+                    </p>
+                    <p className="mt-2 text-3xl font-semibold">{attentionCount}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border/70 bg-background/80 p-4">
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                      Active Human Estimate
+                    </p>
+                    <p className="mt-2 text-3xl font-semibold">
+                      {estimatedHumanHoursActiveLabel ?? "0h human"}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {estimatedHumanHoursTotalLabel ?? "0h human"} total
+                      estimated
+                    </p>
+                  </div>
                   <div className="rounded-2xl border border-border/70 bg-background/80 p-4">
                     <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
                       Repositories
@@ -617,72 +805,55 @@ export function ChangeBoard({
 
         <TabsContent value="codex-console" className="mt-0 flex-1">
           <section className="min-h-full">
-            <div className="border-b border-border/60 px-5 py-4 md:px-6">
-              <h1 className="text-2xl font-semibold tracking-tight">
-                Prism Console
-              </h1>
-              <p className="text-sm text-muted-foreground">
-                Work directly with Prism on request context, review state, and
-                implementation planning.
-              </p>
+            <div className="flex flex-col gap-3 border-b border-border/60 px-5 py-4 sm:flex-row sm:items-start sm:justify-between md:px-6">
+              <div className="min-w-0">
+                <h1 className="text-2xl font-semibold tracking-tight">
+                  Prism Console
+                </h1>
+                <p className="text-sm text-muted-foreground">
+                  Work directly with Prism on request context, review state, and
+                  implementation planning.
+                </p>
+              </div>
+              <div
+                id={codexConsoleSessionControlsId}
+                className="flex shrink-0 justify-start sm:justify-end"
+              />
             </div>
 
-            <CodexConsole isActive={activeTab === "codex-console"} />
+            <CodexConsole
+              isActive={activeTab === "codex-console"}
+              sessionControlsTargetId={codexConsoleSessionControlsId}
+            />
           </section>
         </TabsContent>
 
         <TabsContent value="tasks" className="mt-0 flex-1">
           <section className="min-h-full">
-            <div className="border-b border-border/60 px-5 py-4 md:px-6">
-              <h1 className="text-2xl font-semibold tracking-tight">Tasks</h1>
-              <p className="text-sm text-muted-foreground">
-                View built-in schedules, edit DB-backed cron settings, and run
-                tasks manually.
-              </p>
-            </div>
-
             <TaskRunnerWorkspace />
+          </section>
+        </TabsContent>
+
+        <TabsContent value="capture" className="mt-0 flex-1">
+          <section className="min-h-full">
+            <CaptureWorkspace />
           </section>
         </TabsContent>
 
         <TabsContent value="skills" className="mt-0 flex-1">
           <section className="min-h-full">
-            <div className="border-b border-border/60 px-5 py-4 md:px-6">
-              <h1 className="text-2xl font-semibold tracking-tight">Skills</h1>
-              <p className="text-sm text-muted-foreground">
-                View built-in and instance custom Codex skills available to
-                Prism.
-              </p>
-            </div>
-
             <SkillsWorkspace />
           </section>
         </TabsContent>
 
         <TabsContent value="workflows" className="mt-0 flex-1">
           <section className="min-h-full">
-            <div className="border-b border-border/60 px-5 py-4 md:px-6">
-              <h1 className="text-2xl font-semibold tracking-tight">
-                Workflows
-              </h1>
-              <p className="text-sm text-muted-foreground">
-                View request workflow definitions and their agent configuration.
-              </p>
-            </div>
-
             <WorkflowsWorkspace />
           </section>
         </TabsContent>
 
         <TabsContent value="hooks" className="mt-0 flex-1">
           <section className="min-h-full">
-            <div className="border-b border-border/60 px-5 py-4 md:px-6">
-              <h1 className="text-2xl font-semibold tracking-tight">Hooks</h1>
-              <p className="text-sm text-muted-foreground">
-                Manage on-demand triggers that create workflow-backed requests.
-              </p>
-            </div>
-
             <HooksWorkspace />
           </section>
         </TabsContent>
@@ -700,6 +871,7 @@ export function ChangeBoard({
 
             <AdminSettingsWorkspace
               setup={data.setup}
+              updateStatus={data.updateStatus}
               branding={data.branding}
               onBrandingChange={(branding) =>
                 setData((current) => ({

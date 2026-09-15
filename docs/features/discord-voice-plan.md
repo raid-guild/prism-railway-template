@@ -31,6 +31,7 @@ The Discord command surface uses the `prism-` prefix:
 1. `/prism-join`
    - joins the caller's current voice channel
    - keeps the bot available for a later recording command
+   - explicitly tells the caller that the bot is connected but not recording
 
 2. `/prism-record`
    - joins the caller's current voice channel if needed
@@ -38,16 +39,19 @@ The Discord command surface uses the `prism-` prefix:
    - stores current non-bot voice participants in session metadata
    - eagerly subscribes to current participant audio streams
    - also listens for Discord `speaking.start` events as a backup
+   - persists wall-clock speaker timing events such as stream start, speaking start, first audio chunk, and stream end
    - writes per-speaker Ogg/Opus files under `/data/recordings/<session-id>/raw`
    - persists `session.json` with guild/channel/start/participant metadata so unfinished sessions can be recovered after an adapter restart
 
 3. `/prism-stoprecord`
    - stops active receiver streams
+   - if no active in-memory session exists, only recovers an unfinished session from the caller's current voice channel and only within `VOICE_RECOVERY_MAX_AGE_HOURS`
    - closes Ogg writers
    - runs `ffmpeg` to create segmented mono FLAC chunks under `/data/recordings/<session-id>/flac`
    - sends FLAC chunks to the configured voice transcription provider when `VOICE_TRANSCRIPTION_API_KEY` is set
    - fetches messages posted in the Discord voice channel during the recording window
    - stitches voice transcription segments and voice-channel chat messages into one timestamp-sorted transcript
+   - offsets voice transcription segments from persisted wall-clock audio chunk times instead of only per-speaker chunk indexes
    - writes transcript JSON and markdown under `/data/recordings/<session-id>/transcript`
    - asks `codex-runtime` to synthesize a structured meeting summary when `CODEX_RUNTIME_BASE_URL` is set
    - writes summary JSON and markdown under `/data/recordings/<session-id>/transcript`
@@ -112,6 +116,7 @@ Required for Discord voice:
 - `VOICE_DAVE_ENCRYPTION=true`
 - `VOICE_RECORDING_WARNING_MINUTES=50`
 - `VOICE_RECORDING_MAX_MINUTES=60`
+- `VOICE_RECOVERY_MAX_AGE_HOURS=12`
 - `CODEX_RUNTIME_BASE_URL=https://<codex-runtime-domain>`
 - `PRISM_API_BASE=https://<prism-memory-domain>`
 - `PRISM_API_KEY=<same Prism API key>`
@@ -120,6 +125,7 @@ Recommended:
 
 - `VOICE_FFMPEG_SEGMENT_SECONDS=180`
 - recordings warn at `VOICE_RECORDING_WARNING_MINUTES` and stop automatically at `VOICE_RECORDING_MAX_MINUTES`; set `VOICE_RECORDING_MAX_MINUTES=0` to disable the automatic stop
+- `/prism-stoprecord` only auto-recovers unfinished sessions from the caller's current voice channel and younger than `VOICE_RECOVERY_MAX_AGE_HOURS`; use `POST /recordings/<session-id>/recover` for explicit older recovery
 - use public Railway service URLs for `CODEX_RUNTIME_BASE_URL` and `PRISM_API_BASE` until private `*.railway.internal` connectivity has been verified from inside the deployed service
 
 ## Local Development
@@ -156,8 +162,8 @@ Each session uses:
 
 ```text
 /data/recordings/<session-id>/
-  session.json
-  metadata.json
+  session.json      # participants and timingEvents
+  metadata.json     # speakers, chunks, artifacts, and timingEvents
   raw/
     <user-id>-<username>-<timestamp>.ogg
   flac/

@@ -58,6 +58,33 @@ export const fallbackRequestWorkflowSteps: WorkflowStep[] = [
     label: "Work",
     type: "agent",
     instructionPath: "workflows/change-request-default/steps/implement.md",
+    next: "verify",
+    routes: {},
+    resumeLabel: null,
+  },
+  {
+    key: "verify",
+    label: "Verify",
+    type: "agent",
+    instructionPath: "workflows/change-request-default/steps/verify.md",
+    next: "local-code-review",
+    routes: {},
+    resumeLabel: null,
+  },
+  {
+    key: "local-code-review",
+    label: "Local Code Review",
+    type: "agent",
+    instructionPath: "workflows/change-request-default/steps/local-code-review.md",
+    next: "review-cycle",
+    routes: {},
+    resumeLabel: null,
+  },
+  {
+    key: "review-cycle",
+    label: "Review Decision",
+    type: "loop",
+    instructionPath: null,
     next: "review",
     routes: {},
     resumeLabel: null,
@@ -67,12 +94,8 @@ export const fallbackRequestWorkflowSteps: WorkflowStep[] = [
     label: "Review",
     type: "gate",
     instructionPath: "workflows/change-request-default/steps/review.md",
-    next: null,
-    routes: {
-      approved: "closed",
-      changesRequested: "implement",
-      rejected: "closed",
-    },
+    next: "closed",
+    routes: {},
     resumeLabel: null,
   },
   {
@@ -82,6 +105,15 @@ export const fallbackRequestWorkflowSteps: WorkflowStep[] = [
     instructionPath: null,
     next: null,
     routes: {},
+    resumeLabel: null,
+  },
+  {
+    key: "review-loop-attention",
+    label: "Review Loop Attention",
+    type: "gate",
+    instructionPath: null,
+    next: "review",
+    routes: { revise: "implement" },
     resumeLabel: null,
   },
 ];
@@ -157,6 +189,7 @@ export function priorityVariant(priority: string) {
 export function workflowStepVariant(step: WorkflowStep | null | undefined) {
   if (step?.type === "terminal") return "muted";
   if (step?.type === "gate") return "secondary";
+  if (step?.type === "loop") return "outline";
   if (step?.type === "checkpoint") return "outline";
   if (step?.type === "agent") return "default";
   return "outline";
@@ -176,6 +209,12 @@ export function requestSourceLabel(value: string) {
   if (value === "manual") return "Manual";
   if (value === "admin-hook-test") return "Hook test";
   return requestTypeLabel(value || "unknown");
+}
+
+export function humanHoursLabel(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const formatted = Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+  return `${formatted}h human`;
 }
 
 export function parseTimestamp(value: string | null) {
@@ -260,7 +299,7 @@ export function describeExecutionStage(
   execution: ChangeRequestExecutionRecord | null,
 ) {
   if (!execution) {
-    return "No active execution";
+    return "No active legacy execution";
   }
 
   const traceEntry = latestTraceEntry(execution);

@@ -62,7 +62,7 @@ After the Codex bridge works:
 Why the split stays for now:
 
 - `discord-adapter` and `codex-runtime` are a fresh bridge/runtime rollout and should not be coupled to an app merge
-- `api` already owns the system-of-record schema and execution records
+- `api` already owns the system-of-record schema and agent-run records
 - `site` already owns the current admin surface
 - merging now adds migration risk without improving operator validation
 
@@ -147,7 +147,7 @@ The app surface should remain the system of record for:
 - target apps
 - target environments
 - change requests
-- execution history
+- agent-run history
 - deploy artifacts
 - review state
 
@@ -161,13 +161,13 @@ Git-aware records should instead track:
 - base commit SHA
 - head commit SHA
 - preview deploy metadata
-- lightweight execution and deploy references
+- lightweight agent-run and deploy references
 
 If `site` and `api` are merged, the resulting Next.js app should own both admin UI and internal route handlers for Codex and Discord bridge actions.
 
 Current decision:
 
-- keep `api` as the write authority for change requests, execution records, targets, and deploy metadata
+- keep `api` as the write authority for change requests, agent-run records, targets, and deploy metadata
 - keep `site` as the admin and operator UI shell
 - let both Discord and browser-triggered operator actions resolve through `api`
 - store bridge chat sessions and thread linkage in `api`, not in the Discord transport service
@@ -186,7 +186,7 @@ First-pass goals:
   - request workflow step
   - summarize target
   - deploy staging
-- stream or poll execution output
+- stream or poll agent-run output
 - attach runs to change requests and target environments
 
 Non-goals for first pass:
@@ -199,7 +199,7 @@ Placement decision:
 
 - build the first console inside `services/site`
 - expose backend run-control endpoints from `services/api`
-- let `discord-adapter` and the browser share execution records where possible
+- let `discord-adapter` and the browser share agent-run records where possible
 - let `discord-adapter` and the browser share retrieval and chat-oriented backend contracts where possible
 - use one backend chat-session model for both Discord conversations and future admin console chat
 
@@ -268,8 +268,8 @@ Future direction:
 
 1. Define the Discord transport to `codex-runtime` contract.
 2. Move agent-facing skills into Codex-local skills or app API helpers.
-3. Make change-request execution work from Codex CLI.
-4. Add branch-per-CR workflow and persist git-aware execution metadata plus artifacts.
+3. Make change-request agent runs work from Codex CLI.
+4. Add branch-per-CR workflow and persist git-aware agent-run metadata plus artifacts.
 5. Publish CR branches to GitHub and track PR metadata from the board.
 6. Enable Railway PR environments for published CR pull requests.
 7. Add Discord notifications and command routing.

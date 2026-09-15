@@ -10,7 +10,7 @@ Inputs come from the Prism Agent API response:
 - `targetApp`
 - `targetEnvironment`
 - `deployPlan`
-- latest execution state
+- latest agent run state
 
 Expected work:
 
@@ -46,7 +46,7 @@ For Railway targets:
 5. Ensure `RAILWAY_PROJECT_ID` is set to `deployConfig.projectId` if the shell does not already have it.
 6. Run deploy actions from the hydrated target workspace, not from the runtime service source tree.
 7. After deploy, use Railway logs or GraphQL lookups to capture status and the resulting URL.
-8. Write deploy status, final URL, and any failure details back to the execution record.
+8. Return deploy status, final URL, and any failure details so the current agent run and request artifacts/external refs capture them.
 
 Recommended environment:
 
@@ -119,5 +119,5 @@ Rules:
 - Keep branch naming deterministic per request when possible.
 - Do not guess deploy details when the target metadata is missing; surface the gap.
 - Prefer repo-native scripts over ad hoc shell pipelines.
-- Treat build failures, test failures, and deploy failures as execution outcomes that must be written back to the board.
+- Treat build failures, test failures, and deploy failures as agent-run outcomes that must be captured in the run summary, request artifacts, or external refs.
 - For this stack, prefer `env -u RAILWAY_API_TOKEN railway ...` with the project token for actual code uploads and use GraphQL only when CLI metadata is insufficient.

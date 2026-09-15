@@ -22,13 +22,15 @@ Recommended shared references in this project:
 | --- | --- | --- |
 | `site` | `API_INTERNAL_BASE_URL` | `http://${{site.RAILWAY_PRIVATE_DOMAIN}}:${{site.PORT}}` |
 | `site` | `NEXT_PUBLIC_API_BASE_URL` | `https://${{site.RAILWAY_PUBLIC_DOMAIN}}` |
+| `site` | `COMMUNICATION_ADAPTER_BASE_URL` | `http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}` |
+| `site` | `NEXT_PUBLIC_INTERACTION_BASE_URL` | `https://${{discord-adapter.RAILWAY_PUBLIC_DOMAIN}}` |
 | `codex-runtime` | `APP_API_BASE_URL` | `http://${{site.RAILWAY_PRIVATE_DOMAIN}}:${{site.PORT}}` |
 | `codex-runtime` | `PRISM_API_BASE` | `http://${{prism-memory.RAILWAY_PRIVATE_DOMAIN}}:${{prism-memory.PORT}}` |
 | `codex-runtime` | `APP_API_SERVICE_TOKEN` | `${{site.INTERNAL_SERVICE_TOKEN}}` |
-| `codex-runtime` | `OUTPUT_ADAPTER_BASE_URL` | `http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}` |
-| `codex-runtime` | `OUTPUT_ADAPTER_TOKEN` | `${{discord-adapter.SOURCE_ADAPTER_TOKEN}}` |
-| `task-runner` | `OUTPUT_ADAPTER_BASE_URL` | `http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}` |
-| `task-runner` | `OUTPUT_ADAPTER_TOKEN` | `${{discord-adapter.SOURCE_ADAPTER_TOKEN}}` |
+| `codex-runtime` | `COMMUNICATION_ADAPTER_BASE_URL` | `http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}` |
+| `codex-runtime` | `COMMUNICATION_ADAPTER_TOKEN` | `${{discord-adapter.SOURCE_ADAPTER_TOKEN}}` |
+| `task-runner` | `COMMUNICATION_ADAPTER_BASE_URL` | `http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}` |
+| `task-runner` | `COMMUNICATION_ADAPTER_TOKEN` | `${{discord-adapter.SOURCE_ADAPTER_TOKEN}}` |
 | `discord-adapter` | `APP_API_BASE_URL` | `http://${{site.RAILWAY_PRIVATE_DOMAIN}}:${{site.PORT}}` |
 | `discord-adapter` | `CODEX_RUNTIME_BASE_URL` | `http://${{codex-runtime.RAILWAY_PRIVATE_DOMAIN}}:${{codex-runtime.PORT}}` |
 | `discord-adapter` | `PRISM_API_BASE` | `https://${{prism-memory.RAILWAY_PUBLIC_DOMAIN}}` |
@@ -47,7 +49,9 @@ Required:
 
 - `PORT=3100`
 - `NEXT_PUBLIC_API_BASE_URL=https://${{site.RAILWAY_PUBLIC_DOMAIN}}`
+- `NEXT_PUBLIC_INTERACTION_BASE_URL=https://${{discord-adapter.RAILWAY_PUBLIC_DOMAIN}}`
 - `API_INTERNAL_BASE_URL=http://${{site.RAILWAY_PRIVATE_DOMAIN}}:${{site.PORT}}`
+- `COMMUNICATION_ADAPTER_BASE_URL=http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}`
 - `SITE_USE_LOCAL_APP_API=true`
 - `PRISM_AGENT_DATA_ROOT=/data`
 - `SESSION_SECRET=<strong-secret>`
@@ -78,8 +82,8 @@ Recommended:
 - `PRISM_API_KEY=<read-or-limited prism api key>`
 - `APP_API_BASE_URL=http://${{site.RAILWAY_PRIVATE_DOMAIN}}:${{site.PORT}}`
 - `APP_API_SERVICE_TOKEN=${{site.INTERNAL_SERVICE_TOKEN}}`
-- `OUTPUT_ADAPTER_BASE_URL=http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}`
-- `OUTPUT_ADAPTER_TOKEN=${{discord-adapter.SOURCE_ADAPTER_TOKEN}}`
+- `COMMUNICATION_ADAPTER_BASE_URL=http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}`
+- `COMMUNICATION_ADAPTER_TOKEN=${{discord-adapter.SOURCE_ADAPTER_TOKEN}}`
 
 Notes:
 

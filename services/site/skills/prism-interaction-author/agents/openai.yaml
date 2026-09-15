@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prism Interaction Author"
+  short_description: "Configure external interaction profiles and interfaces"
+  default_prompt: "Create or update a disabled Prism external interaction interface and report the Settings credential step."

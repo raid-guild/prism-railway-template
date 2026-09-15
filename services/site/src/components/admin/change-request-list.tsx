@@ -1,9 +1,15 @@
 import { useMemo } from "react";
-import { Search } from "lucide-react";
+import { Filter, Search } from "lucide-react";
 
 import { ChangeRequestRow } from "@/components/admin/change-request-row";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
@@ -33,11 +39,14 @@ export function ChangeRequestList({
   lifecycleFilter,
   typeFilter,
   repositoryFilter,
+  stepFilters,
+  workflowStepOptions,
   searchQuery,
   sortValue,
   onLifecycleFilterChange,
   onTypeFilterChange,
   onRepositoryFilterChange,
+  onStepFiltersChange,
   onSearchQueryChange,
   onSortValueChange,
   onOpenRequest,
@@ -50,11 +59,14 @@ export function ChangeRequestList({
   lifecycleFilter: string;
   typeFilter: string;
   repositoryFilter: string;
+  stepFilters: string[];
+  workflowStepOptions: { key: string; label: string }[];
   searchQuery: string;
   sortValue: RequestSortValue;
   onLifecycleFilterChange: (value: string) => void;
   onTypeFilterChange: (value: string) => void;
   onRepositoryFilterChange: (value: string) => void;
+  onStepFiltersChange: (value: string[]) => void;
   onSearchQueryChange: (value: string) => void;
   onSortValueChange: (value: RequestSortValue) => void;
   onOpenRequest: (request: ChangeRequestRecord) => void;
@@ -63,10 +75,26 @@ export function ChangeRequestList({
     () => new Map(workflows.map((workflow) => [workflow.key, workflow])),
     [workflows],
   );
+  const selectedStepLabel =
+    stepFilters.length === 0
+      ? "All steps"
+      : stepFilters.length === 1
+        ? (workflowStepOptions.find((step) => step.key === stepFilters[0])
+            ?.label ?? "1 step")
+        : `${stepFilters.length} steps`;
+
+  function toggleStepFilter(stepKey: string) {
+    onStepFiltersChange(
+      stepFilters.includes(stepKey)
+        ? stepFilters.filter((current) => current !== stepKey)
+        : [...stepFilters, stepKey],
+    );
+  }
+
   return (
     <>
       <div className="border-b border-border/60 bg-background px-5 py-4 md:px-6">
-        <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_160px_160px_180px_170px]">
+        <div className="grid gap-3 xl:grid-cols-[minmax(220px,1fr)_150px_150px_180px_180px_170px]">
           <div className="space-y-2">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -127,6 +155,52 @@ export function ChangeRequestList({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button type="button" variant="outline" className="w-full justify-between">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <Filter className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{selectedStepLabel}</span>
+                  </span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-72">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium">Workflow steps</p>
+                    {stepFilters.length ? (
+                      <button
+                        type="button"
+                        onClick={() => onStepFiltersChange([])}
+                        className="text-xs text-muted-foreground underline underline-offset-2"
+                      >
+                        Clear
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                    {workflowStepOptions.map((step) => (
+                      <label
+                        key={step.key}
+                        className="flex cursor-pointer items-center gap-2 text-sm"
+                      >
+                        <Checkbox
+                          checked={stepFilters.includes(step.key)}
+                          onCheckedChange={() => toggleStepFilter(step.key)}
+                        />
+                        <span className="min-w-0 truncate">{step.label}</span>
+                      </label>
+                    ))}
+                    {!workflowStepOptions.length ? (
+                      <p className="text-sm text-muted-foreground">No workflow steps found.</p>
+                    ) : null}
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
 
           <div className="space-y-2">

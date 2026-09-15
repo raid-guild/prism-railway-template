@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { Footer } from "@/components/shared/footer";
 import { Button } from "@/components/ui/button";
+import { isPrismLabEnabled } from "@/lib/prism-lab/feature-flag";
 
 const apiBase =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
@@ -29,6 +30,7 @@ async function getHealth() {
 
 export default async function Page() {
   const health = await getHealth();
+  const labEnabled = isPrismLabEnabled(process.env.PRISM_LAB_ENABLED);
 
   return (
     <div className="flex min-h-screen w-full flex-col">
@@ -48,11 +50,11 @@ export default async function Page() {
                 Prism Refactory
               </p>
               <h1 className="max-w-4xl text-5xl leading-none tracking-tight md:text-7xl">
-                Change requests in front, controlled agent execution behind.
+                Change requests in front, controlled agent runs behind.
               </h1>
               <p className="max-w-3xl text-lg leading-8 text-muted-foreground md:text-2xl">
                 A product-friendly surface for triaging work, routing it into
-                controlled agent execution, and keeping every production-facing
+                controlled agent runs, and keeping every production-facing
                 change under human review.
               </p>
               <p className="max-w-2xl text-base leading-7 text-muted-foreground">
@@ -63,6 +65,14 @@ export default async function Page() {
               <div className="flex flex-wrap gap-3 pt-2">
                 <Button asChild className="holographic-shimmer-hover">
                   <Link href="/admin">Open admin board</Link>
+                </Button>
+                {labEnabled ? (
+                  <Button asChild variant="secondary">
+                    <Link href="/admin/lab">Open Prism Lab</Link>
+                  </Button>
+                ) : null}
+                <Button asChild variant="secondary">
+                  <Link href="/docs">Read user docs</Link>
                 </Button>
                 <Button asChild variant="outline">
                   <a

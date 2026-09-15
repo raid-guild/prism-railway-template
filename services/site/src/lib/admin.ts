@@ -1,6 +1,11 @@
-import { getAdminBoardSnapshot, getAdminSetupStatus, loadConfig, readSiteContent } from "@/lib/app-core"
+import { getAdminBoardSnapshot, getAdminSetupStatus, loadConfig, readSiteContent, type RequestOriginSnapshot } from "@/lib/app-core"
 import { requireAdminSession } from "@/lib/admin-auth"
+import { getPrismUpdateStatus, type PrismUpdateStatus } from "@/lib/prism-version"
 import type { Capability } from "@/lib/role-access"
+import {
+  projectActiveRequestAgentRuns,
+  type ActiveRequestAgentRunSummary,
+} from "@/lib/prism-lab/active-run-projection"
 
 function useLocalAppApi() {
   return process.env.SITE_USE_LOCAL_APP_API?.trim() === "true"
@@ -56,7 +61,8 @@ export type ChangeRequestRecord = {
   source: string
   requestedByUserId: string | null
   requestedByDisplayName: string | null
-  targetAppId: string | null
+  origin?: RequestOriginSnapshot | null
+  targetAppId?: string | null
   targetAppSlug: string | null
   targetAppName: string | null
   targetEnvironmentId: string | null
@@ -64,7 +70,18 @@ export type ChangeRequestRecord = {
   targetEnvironmentName: string | null
   currentWorkflowStepKey: string | null
   workflowRunStatus: string | null
+  workflowAttention: {
+    status: "blocked" | "needs_attention"
+    summary: string | null
+    suggestedFix: string | null
+    blockers: Array<Record<string, unknown>>
+    agentRunId: string
+    workflowRunId: string | null
+    workflowStepKey: string | null
+    createdAt: string
+  } | null
   triageSummary: string | null
+  estimatedHumanHours: number | null
   acceptanceCriteria: unknown[]
   constraints: Record<string, unknown>
   attachments: unknown[]
@@ -100,6 +117,35 @@ export type ChangeRequestExecutionRecord = {
   finishedAt: string | null
 }
 
+export type AgentRunRecord = {
+  id: string
+  kind: string
+  status: string
+  lane: string
+  priority: number
+  idempotencyKey: string | null
+  requestId: string | null
+  workflowRunId: string | null
+  workflowStepKey: string | null
+  taskKey: string | null
+  hookKey: string | null
+  sessionId: string | null
+  source: string
+  input: Record<string, unknown>
+  result: Record<string, unknown>
+  trace: Array<Record<string, unknown>>
+  errorMessage: string | null
+  queuedAt: string
+  claimedAt: string | null
+  leaseExpiresAt: string | null
+  queueReason: string | null
+  queuePosition: number | null
+  startedAt: string | null
+  finishedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 export type WorkflowRecord = {
   id: string
   key: string
@@ -128,6 +174,7 @@ export type WorkflowEventRecord = {
 
 export type RequestArtifactRecord = {
   id: string
+  agentRunId: string | null
   requestId: string
   workflowRunId: string | null
   executionId: string | null
@@ -188,10 +235,13 @@ export type AdminBoardData = {
   targetEnvironments: TargetEnvironmentRecord[]
   changeRequests: ChangeRequestRecord[]
   workflows?: WorkflowRecord[]
+  /** Non-sensitive occupancy summaries for actual active request-linked runs. */
+  activeRequestAgentRuns?: ActiveRequestAgentRunSummary[]
 }
 
 export type AdminWorkspaceData = AdminBoardData & {
   setup: AdminSetupStatus
+  updateStatus: PrismUpdateStatus
   branding: {
     brandName: string
     logoUrl: string
@@ -266,16 +316,29 @@ export async function getAdminBoardData(): Promise<
   }
 
   try {
-    const [targetAppsResponse, targetEnvironmentsResponse, changeRequestsResponse] = await Promise.all([
+    const [
+      targetAppsResponse,
+      targetEnvironmentsResponse,
+      changeRequestsResponse,
+      queuedRunsResponse,
+      claimedRunsResponse,
+      runningRunsResponse,
+    ] = await Promise.all([
       adminFetch("/api/admin/target-apps"),
       adminFetch("/api/admin/target-environments"),
       adminFetch("/api/admin/change-board/requests"),
+      adminFetch("/api/admin/agent-runs?status=queued&limit=200"),
+      adminFetch("/api/admin/agent-runs?status=claimed&limit=200"),
+      adminFetch("/api/admin/agent-runs?status=running&limit=200"),
     ])
 
     if (
       targetAppsResponse.status === 401 ||
       targetEnvironmentsResponse.status === 401 ||
-      changeRequestsResponse.status === 401
+      changeRequestsResponse.status === 401 ||
+      queuedRunsResponse.status === 401 ||
+      claimedRunsResponse.status === 401 ||
+      runningRunsResponse.status === 401
     ) {
       return { ok: false, reason: "unauthorized" }
     }
@@ -283,15 +346,28 @@ export async function getAdminBoardData(): Promise<
     if (
       !targetAppsResponse.ok ||
       !targetEnvironmentsResponse.ok ||
-      !changeRequestsResponse.ok
+      !changeRequestsResponse.ok ||
+      !queuedRunsResponse.ok ||
+      !claimedRunsResponse.ok ||
+      !runningRunsResponse.ok
     ) {
       return { ok: false, reason: "error" }
     }
 
-    const [targetAppsJson, targetEnvironmentsJson, changeRequestsJson] = await Promise.all([
+    const [
+      targetAppsJson,
+      targetEnvironmentsJson,
+      changeRequestsJson,
+      queuedRunsJson,
+      claimedRunsJson,
+      runningRunsJson,
+    ] = await Promise.all([
       targetAppsResponse.json() as Promise<{ targetApps: TargetAppRecord[] }>,
       targetEnvironmentsResponse.json() as Promise<{ targetEnvironments: TargetEnvironmentRecord[] }>,
       changeRequestsResponse.json() as Promise<{ changeRequests: ChangeRequestRecord[] }>,
+      queuedRunsResponse.json() as Promise<{ runs: AgentRunRecord[] }>,
+      claimedRunsResponse.json() as Promise<{ runs: AgentRunRecord[] }>,
+      runningRunsResponse.json() as Promise<{ runs: AgentRunRecord[] }>,
     ])
 
     return {
@@ -301,6 +377,11 @@ export async function getAdminBoardData(): Promise<
         targetEnvironments: targetEnvironmentsJson.targetEnvironments,
         changeRequests: changeRequestsJson.changeRequests,
         workflows: [],
+        activeRequestAgentRuns: projectActiveRequestAgentRuns([
+          ...queuedRunsJson.runs,
+          ...claimedRunsJson.runs,
+          ...runningRunsJson.runs,
+        ]),
       },
     }
   } catch {
@@ -323,6 +404,7 @@ export async function getAdminWorkspaceData(): Promise<
         data: {
           ...getAdminBoardSnapshot(),
           setup: await getAdminSetupStatus(),
+          updateStatus: await getPrismUpdateStatus(),
           branding: adminBranding(),
           session: {
             userId: access.session.userId,
@@ -342,9 +424,10 @@ export async function getAdminWorkspaceData(): Promise<
   }
 
   try {
-    const [board, setupResponse] = await Promise.all([
+    const [board, setupResponse, updateStatus] = await Promise.all([
       getAdminBoardData(),
       adminFetch("/api/admin/setup/status"),
+      getPrismUpdateStatus(),
     ])
 
     if (!board.ok) {
@@ -368,6 +451,7 @@ export async function getAdminWorkspaceData(): Promise<
       data: {
         ...board.data,
         setup: setupJson.setup,
+        updateStatus,
         branding: adminBranding(),
         session: {
           userId: access.userId,

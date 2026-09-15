@@ -135,7 +135,7 @@ export async function POST(request: Request) {
   const task = upsertTask({
     key,
     name,
-    description: parseString(body?.description) || "Custom scheduled Codex prompt task",
+    description: parseString(body?.description) || "Custom scheduled agent prompt task",
     enabled: parseBoolean(body?.enabled) ?? false,
     triggerType: "schedule",
     scheduleCron,

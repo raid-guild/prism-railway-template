@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   AlertCircle,
-  ChevronDown,
   CheckCircle2,
   Clock3,
   Eye,
@@ -16,11 +15,6 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -68,13 +62,39 @@ type TaskPayload = {
   error?: string;
 };
 
+type TasksView = "custom" | "built-in" | "runs";
+
 const cronPresets = [
-  { label: "Hourly at :55", value: "55 * * * *", preview: "Runs hourly at minute 55 UTC" },
-  { label: "Every hour", value: "0 * * * *", preview: "Runs hourly at minute 0 UTC" },
-  { label: "Daily at 9:00 UTC", value: "0 9 * * *", preview: "Runs daily at 09:00 UTC" },
-  { label: "Weekdays at 9:00 UTC", value: "0 9 * * 1-5", preview: "Runs Monday-Friday at 09:00 UTC" },
-  { label: "Weekly Monday 9:00 UTC", value: "0 9 * * 1", preview: "Runs every Monday at 09:00 UTC" },
-  { label: "Monthly on the 1st 9:00 UTC", value: "0 9 1 * *", preview: "Runs monthly on day 1 at 09:00 UTC" },
+  {
+    label: "Hourly at :55",
+    value: "55 * * * *",
+    preview: "Runs hourly at minute 55 UTC",
+  },
+  {
+    label: "Every hour",
+    value: "0 * * * *",
+    preview: "Runs hourly at minute 0 UTC",
+  },
+  {
+    label: "Daily at 9:00 UTC",
+    value: "0 9 * * *",
+    preview: "Runs daily at 09:00 UTC",
+  },
+  {
+    label: "Weekdays at 9:00 UTC",
+    value: "0 9 * * 1-5",
+    preview: "Runs Monday-Friday at 09:00 UTC",
+  },
+  {
+    label: "Weekly Monday 9:00 UTC",
+    value: "0 9 * * 1",
+    preview: "Runs every Monday at 09:00 UTC",
+  },
+  {
+    label: "Monthly on the 1st 9:00 UTC",
+    value: "0 9 1 * *",
+    preview: "Runs monthly on day 1 at 09:00 UTC",
+  },
 ];
 
 const cronAllowedPattern = /^[\d*\/,\-\s]+$/;
@@ -104,10 +124,16 @@ function cronDetails(value: string) {
   }
   const parts = cron.split(" ");
   if (parts.length !== 5) {
-    return { valid: false, preview: "Use five fields: minute hour day month weekday." };
+    return {
+      valid: false,
+      preview: "Use five fields: minute hour day month weekday.",
+    };
   }
   if (!cronAllowedPattern.test(cron)) {
-    return { valid: false, preview: "Only numbers, *, /, comma, and ranges are supported here." };
+    return {
+      valid: false,
+      preview: "Only numbers, *, /, comma, and ranges are supported here.",
+    };
   }
 
   const [minute, hour, day, month, weekday] = parts;
@@ -120,23 +146,68 @@ function cronDetails(value: string) {
     return { valid: false, preview: "Hour must be between 0 and 23." };
   }
 
-  if (fixedMinute !== null && hour === "*" && day === "*" && month === "*" && weekday === "*") {
+  if (
+    fixedMinute !== null &&
+    hour === "*" &&
+    day === "*" &&
+    month === "*" &&
+    weekday === "*"
+  ) {
     return { valid: true, preview: `Runs hourly at minute ${fixedMinute} UTC` };
   }
-  if (fixedMinute !== null && fixedHour !== null && day === "*" && month === "*" && weekday === "*") {
-    return { valid: true, preview: `Runs daily at ${padTime(String(fixedHour))}:${padTime(String(fixedMinute))} UTC` };
+  if (
+    fixedMinute !== null &&
+    fixedHour !== null &&
+    day === "*" &&
+    month === "*" &&
+    weekday === "*"
+  ) {
+    return {
+      valid: true,
+      preview: `Runs daily at ${padTime(String(fixedHour))}:${padTime(String(fixedMinute))} UTC`,
+    };
   }
-  if (fixedMinute !== null && fixedHour !== null && day === "*" && month === "*" && weekday === "1-5") {
-    return { valid: true, preview: `Runs Monday-Friday at ${padTime(String(fixedHour))}:${padTime(String(fixedMinute))} UTC` };
+  if (
+    fixedMinute !== null &&
+    fixedHour !== null &&
+    day === "*" &&
+    month === "*" &&
+    weekday === "1-5"
+  ) {
+    return {
+      valid: true,
+      preview: `Runs Monday-Friday at ${padTime(String(fixedHour))}:${padTime(String(fixedMinute))} UTC`,
+    };
   }
-  if (fixedMinute !== null && fixedHour !== null && day === "*" && month === "*" && weekdayLabels[weekday]) {
-    return { valid: true, preview: `Runs every ${weekdayLabels[weekday]} at ${padTime(String(fixedHour))}:${padTime(String(fixedMinute))} UTC` };
+  if (
+    fixedMinute !== null &&
+    fixedHour !== null &&
+    day === "*" &&
+    month === "*" &&
+    weekdayLabels[weekday]
+  ) {
+    return {
+      valid: true,
+      preview: `Runs every ${weekdayLabels[weekday]} at ${padTime(String(fixedHour))}:${padTime(String(fixedMinute))} UTC`,
+    };
   }
-  if (fixedMinute !== null && fixedHour !== null && /^\d+$/.test(day) && month === "*" && weekday === "*") {
-    return { valid: true, preview: `Runs monthly on day ${day} at ${padTime(String(fixedHour))}:${padTime(String(fixedMinute))} UTC` };
+  if (
+    fixedMinute !== null &&
+    fixedHour !== null &&
+    /^\d+$/.test(day) &&
+    month === "*" &&
+    weekday === "*"
+  ) {
+    return {
+      valid: true,
+      preview: `Runs monthly on day ${day} at ${padTime(String(fixedHour))}:${padTime(String(fixedMinute))} UTC`,
+    };
   }
 
-  return { valid: true, preview: "Custom schedule. Times are interpreted as UTC." };
+  return {
+    valid: true,
+    preview: "Custom schedule. Times are interpreted as UTC.",
+  };
 }
 
 function formatDate(value: string | null) {
@@ -175,7 +246,14 @@ function taskDescription(key: string) {
   if (key === "discord-sync") return "Pulls Discord activity into Prism.";
   if (key === "memory-run") return "Runs the Prism Memory pipeline.";
   if (key === "knowledge-run") return "Refreshes Prism Knowledge artifacts.";
-  if (key === "knowledge-source-sync") return "Checks configured GitHub knowledge sources and syncs changed branches.";
+  if (key === "knowledge-source-sync")
+    return "Checks configured GitHub knowledge sources and syncs changed branches.";
+  if (key === "skill-source-sync")
+    return "Syncs configured GitHub skill sources into the site skill catalog.";
+  if (key === "prism-doctor")
+    return "Checks workflows, tasks, and hooks for structural drift without mutating content.";
+  if (key === "portal-email-dispatch" || key === "portal-notification-email-dispatch")
+    return "Dispatches queued Portal email notifications through the Portal API.";
   return "Scheduled task";
 }
 
@@ -188,6 +266,9 @@ function taskTypeBadge(taskType: string) {
   }
   if (taskType === "workflow-runner") {
     return <Badge variant="default">Workflow</Badge>;
+  }
+  if (taskType === "http-post") {
+    return <Badge variant="outline">HTTP</Badge>;
   }
   return <Badge variant="muted">{taskType || "task"}</Badge>;
 }
@@ -238,13 +319,15 @@ export function TaskRunnerWorkspace() {
     tasks: [],
     error: null,
   });
-  const [drafts, setDrafts] = useState<Record<string, { enabled: boolean; scheduleCron: string }>>({});
+  const [drafts, setDrafts] = useState<
+    Record<string, { enabled: boolean; scheduleCron: string }>
+  >({});
   const [error, setError] = useState<string | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [runningKey, setRunningKey] = useState<string | null>(null);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [isBuiltInOpen, setIsBuiltInOpen] = useState(false);
+  const [activeView, setActiveView] = useState<TasksView>("custom");
   const [isCreating, setIsCreating] = useState(false);
   const [selectedRun, setSelectedRun] = useState<TaskRunRecord | null>(null);
   const [createForm, setCreateForm] = useState({
@@ -288,7 +371,11 @@ export function TaskRunnerWorkspace() {
         await loadTasks();
       } catch (nextError) {
         if (!hasLoadedTasksRef.current) {
-          setError(nextError instanceof Error ? nextError.message : "Could not load tasks");
+          setError(
+            nextError instanceof Error
+              ? nextError.message
+              : "Could not load tasks",
+          );
         }
       }
     });
@@ -318,8 +405,28 @@ export function TaskRunnerWorkspace() {
     }
     return map;
   }, [runner.tasks]);
-  const customTasks = useMemo(() => tasks.filter((task) => task.taskType !== "builtin"), [tasks]);
-  const builtInTasks = useMemo(() => tasks.filter((task) => task.taskType === "builtin"), [tasks]);
+  const customTasks = useMemo(
+    () => tasks.filter((task) => task.taskType !== "builtin"),
+    [tasks],
+  );
+  const builtInTasks = useMemo(
+    () => tasks.filter((task) => task.taskType === "builtin"),
+    [tasks],
+  );
+  const enabledTaskCount = useMemo(
+    () => tasks.filter((task) => task.enabled).length,
+    [tasks],
+  );
+  const viewOptions: Array<{ value: TasksView; label: string; count: number }> =
+    [
+      { value: "custom", label: "Custom Tasks", count: customTasks.length },
+      {
+        value: "built-in",
+        label: "Built-In Tasks",
+        count: builtInTasks.length,
+      },
+      { value: "runs", label: "Recent Runs", count: runs.length },
+    ];
   const selectedRunResponse = runResponseText(selectedRun);
   const createCron = cronDetails(createForm.scheduleCron);
 
@@ -339,13 +446,18 @@ export function TaskRunnerWorkspace() {
           scheduleCron: draft.scheduleCron.trim() || null,
         }),
       });
-      const payload = (await response.json()) as { ok?: boolean; error?: string };
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+      };
       if (!response.ok || payload.ok === false) {
         throw new Error(payload.error || "Could not save task");
       }
       await loadTasks();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not save task");
+      setError(
+        nextError instanceof Error ? nextError.message : "Could not save task",
+      );
     } finally {
       setSavingKey(null);
     }
@@ -355,16 +467,24 @@ export function TaskRunnerWorkspace() {
     setError(null);
     setRunningKey(task.key);
     try {
-      const response = await fetch(`/admin/tasks/${encodeURIComponent(task.key)}/run`, {
-        method: "POST",
-      });
-      const payload = (await response.json()) as { ok?: boolean; error?: string };
+      const response = await fetch(
+        `/admin/tasks/${encodeURIComponent(task.key)}/run`,
+        {
+          method: "POST",
+        },
+      );
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+      };
       if (!response.ok || payload.ok === false) {
         throw new Error(payload.error || "Could not run task");
       }
       await loadTasks();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not run task");
+      setError(
+        nextError instanceof Error ? nextError.message : "Could not run task",
+      );
     } finally {
       setRunningKey(null);
     }
@@ -379,7 +499,10 @@ export function TaskRunnerWorkspace() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(createForm),
       });
-      const payload = (await response.json()) as { ok?: boolean; error?: string };
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+      };
       if (!response.ok || payload.ok === false) {
         throw new Error(payload.error || "Could not create task");
       }
@@ -387,7 +510,11 @@ export function TaskRunnerWorkspace() {
       setIsCreateOpen(false);
       await loadTasks();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not create task");
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Could not create task",
+      );
     } finally {
       setIsCreating(false);
     }
@@ -395,22 +522,34 @@ export function TaskRunnerWorkspace() {
 
   async function deleteTask(task: TaskRecord) {
     if (task.taskType === "builtin") return;
-    const confirmed = window.confirm(`Delete task "${task.name}"? Run history will remain, but the task will no longer be scheduled.`);
+    const confirmed = window.confirm(
+      `Delete task "${task.name}"? Run history will remain, but the task will no longer be scheduled.`,
+    );
     if (!confirmed) return;
 
     setError(null);
     setDeletingKey(task.key);
     try {
-      const response = await fetch(`/admin/tasks/${encodeURIComponent(task.key)}`, {
-        method: "DELETE",
-      });
-      const payload = (await response.json()) as { ok?: boolean; error?: string };
+      const response = await fetch(
+        `/admin/tasks/${encodeURIComponent(task.key)}`,
+        {
+          method: "DELETE",
+        },
+      );
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+      };
       if (!response.ok || payload.ok === false) {
         throw new Error(payload.error || "Could not delete task");
       }
       await loadTasks();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not delete task");
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Could not delete task",
+      );
     } finally {
       setDeletingKey(null);
     }
@@ -438,14 +577,25 @@ export function TaskRunnerWorkspace() {
             <h2 className="text-base font-semibold">{task.name}</h2>
             <Badge variant="outline">{task.key}</Badge>
             {taskTypeBadge(task.taskType)}
-            {statusBadge(runnerTask?.status ?? latestRun?.status ?? (task.enabled ? "idle" : "disabled"))}
+            {statusBadge(
+              runnerTask?.status ??
+                latestRun?.status ??
+                (task.enabled ? "idle" : "disabled"),
+            )}
           </div>
           <p className="mt-2 text-sm text-muted-foreground">
             {task.description || taskDescription(task.key)}
           </p>
           <div className="mt-3 grid gap-1 text-xs text-muted-foreground">
-            <span>Last run: {formatDate(runnerTask?.lastRunAt ?? latestRun?.startedAt ?? null)}</span>
-            <span>Last success: {formatDate(runnerTask?.lastSuccessAt ?? null)}</span>
+            <span>
+              Last run:{" "}
+              {formatDate(
+                runnerTask?.lastRunAt ?? latestRun?.startedAt ?? null,
+              )}
+            </span>
+            <span>
+              Last success: {formatDate(runnerTask?.lastSuccessAt ?? null)}
+            </span>
             <span>Next run: {formatDate(runnerTask?.nextRunAt ?? null)}</span>
           </div>
         </div>
@@ -468,12 +618,21 @@ export function TaskRunnerWorkspace() {
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor={`${task.key}-cron`} className="flex items-center gap-2">
+            <Label
+              htmlFor={`${task.key}-cron`}
+              className="flex items-center gap-2"
+            >
               <Clock3 className="h-4 w-4" />
               Cron
             </Label>
             <Select
-              value={cronPresets.some((preset) => preset.value === draft.scheduleCron.trim()) ? draft.scheduleCron.trim() : ""}
+              value={
+                cronPresets.some(
+                  (preset) => preset.value === draft.scheduleCron.trim(),
+                )
+                  ? draft.scheduleCron.trim()
+                  : ""
+              }
               onValueChange={(value) =>
                 setDrafts((current) => {
                   const latest = current[task.key] ?? draft;
@@ -509,7 +668,9 @@ export function TaskRunnerWorkspace() {
                 })
               }
             />
-            <p className={`text-xs ${cron.valid ? "text-muted-foreground" : "text-destructive"}`}>
+            <p
+              className={`text-xs ${cron.valid ? "text-muted-foreground" : "text-destructive"}`}
+            >
               {cron.preview}
             </p>
           </div>
@@ -565,48 +726,13 @@ export function TaskRunnerWorkspace() {
   }
 
   return (
-    <div className="grid gap-5 px-5 py-5 md:px-6">
-      <section className="grid gap-3 md:grid-cols-3">
-        <div className="border border-border/70 bg-background p-4">
-          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-            DB Tasks
-          </p>
-          <p className="mt-2 text-3xl font-semibold">{tasks.length}</p>
-        </div>
-        <div className="border border-border/70 bg-background p-4">
-          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-            Enabled
-          </p>
-          <p className="mt-2 text-3xl font-semibold">
-            {tasks.filter((task) => task.enabled).length}
-          </p>
-        </div>
-        <div className="border border-border/70 bg-background p-4">
-          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-            Runner
-          </p>
-          <div className="mt-3 flex items-center gap-2">
-            {runner.reachable ? (
-              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-            ) : (
-              <AlertCircle className="h-4 w-4 text-muted-foreground" />
-            )}
-            <p className="text-sm font-medium">
-              {runner.reachable
-                ? "Reachable"
-                : runner.configured
-                  ? "Unreachable"
-                  : "Not configured"}
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-4">
+    <div className="grid gap-5">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 px-5 py-4 md:px-6">
         <div className="min-w-0">
-          <p className="text-sm font-medium">Scheduled Tasks</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Tasks</h1>
           <p className="text-sm text-muted-foreground">
-            DB rows are the source of truth. The task-runner refreshes them on each poll.
+            View built-in schedules, edit DB-backed cron settings, and run tasks
+            manually.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -614,114 +740,184 @@ export function TaskRunnerWorkspace() {
             <Plus className="h-4 w-4" />
             New Custom Task
           </Button>
-          <Button type="button" variant="outline" onClick={refresh} disabled={isRefreshing}>
-            <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+          <Button
+            type="button"
+            variant="outline"
+            onClick={refresh}
+            disabled={isRefreshing}
+          >
+            <RefreshCw
+              className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`}
+            />
             Refresh
           </Button>
         </div>
       </div>
 
-      {error ? (
-        <div className="border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {error}
-        </div>
-      ) : null}
-      {runner.error ? (
-        <div className="border border-border/70 bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
-          {runner.error}
-        </div>
-      ) : null}
-
-      <section className="grid gap-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium">Custom Tasks</p>
-            <p className="text-sm text-muted-foreground">Instance-created scheduled prompts and workflow runners.</p>
+      <section className="grid gap-5 px-5 md:px-6">
+        <section className="grid gap-3 md:grid-cols-3">
+          <div className="border border-border/70 bg-background p-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+              DB Tasks
+            </p>
+            <p className="mt-2 text-3xl font-semibold">{tasks.length}</p>
           </div>
-          <Badge variant="outline">{customTasks.length}</Badge>
+          <div className="border border-border/70 bg-background p-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+              Enabled
+            </p>
+            <p className="mt-2 text-3xl font-semibold">{enabledTaskCount}</p>
+          </div>
+          <div className="border border-border/70 bg-background p-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+              Runner
+            </p>
+            <div className="mt-3 flex items-center gap-2">
+              {runner.reachable ? (
+                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+              ) : (
+                <AlertCircle className="h-4 w-4 text-muted-foreground" />
+              )}
+              <p className="text-sm font-medium">
+                {runner.reachable
+                  ? "Reachable"
+                  : runner.configured
+                    ? "Unreachable"
+                    : "Not configured"}
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <div className="inline-flex h-auto flex-wrap bg-transparent p-0">
+          {viewOptions.map((option) => {
+            const isActive = option.value === activeView;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={isActive}
+                onClick={() => setActiveView(option.value)}
+                className={[
+                  "rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors",
+                  isActive
+                    ? "border-border/70 bg-background text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                ].join(" ")}
+              >
+                {option.label}
+                <span className="ml-2 text-muted-foreground">
+                  {option.count}
+                </span>
+              </button>
+            );
+          })}
         </div>
-        {customTasks.map(renderTask)}
-        {!customTasks.length && !error ? (
-          <div className="border border-border/70 bg-background px-4 py-6 text-sm text-muted-foreground">
-            No custom tasks created.
+
+        {error ? (
+          <div className="border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {error}
           </div>
         ) : null}
-      </section>
+        {runner.error ? (
+          <div className="border border-border/70 bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+            {runner.error}
+          </div>
+        ) : null}
 
-      <Collapsible open={isBuiltInOpen} onOpenChange={setIsBuiltInOpen} className="grid gap-3">
-        <CollapsibleTrigger asChild>
-          <Button type="button" variant="outline" className="justify-between">
-            <span>Built-In Tasks</span>
-            <span className="flex items-center gap-2 text-muted-foreground">
-              {builtInTasks.length}
-              <ChevronDown className={`h-4 w-4 transition-transform ${isBuiltInOpen ? "rotate-180" : ""}`} />
-            </span>
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="grid gap-3">
-          {builtInTasks.map(renderTask)}
-          {!builtInTasks.length && !error ? (
-            <div className="border border-border/70 bg-background px-4 py-6 text-sm text-muted-foreground">
-              No built-in tasks registered.
-            </div>
-          ) : null}
-        </CollapsibleContent>
-      </Collapsible>
+        {activeView === "custom" ? (
+          <section className="grid gap-3">
+            {customTasks.map(renderTask)}
+            {!customTasks.length && !error ? (
+              <div className="border border-border/70 bg-background px-4 py-6 text-sm text-muted-foreground">
+                No custom tasks created.
+              </div>
+            ) : null}
+          </section>
+        ) : null}
 
-      <section className="grid gap-3">
-        <div>
-          <p className="text-sm font-medium">Recent Runs</p>
-          <p className="text-sm text-muted-foreground">
-            Latest task-run rows written by scheduled or manual execution.
-          </p>
-        </div>
-        <div className="overflow-x-auto border border-border/70 bg-background">
-          <table className="w-full min-w-[760px] text-left text-sm">
-            <thead className="border-b border-border/70 bg-muted/40 text-xs uppercase tracking-[0.12em] text-muted-foreground">
-              <tr>
-                <th className="px-4 py-3 font-medium">Task</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium">Source</th>
-                <th className="px-4 py-3 font-medium">Started</th>
-                <th className="px-4 py-3 font-medium">Finished</th>
-                <th className="px-4 py-3 font-medium">Summary</th>
-                <th className="px-4 py-3 font-medium text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.slice(0, 20).map((run) => (
-                <tr key={run.id} className="border-b border-border/50 last:border-b-0">
-                  <td className="px-4 py-3 font-medium">{run.taskKey ?? "unknown"}</td>
-                  <td className="px-4 py-3">{statusBadge(run.status)}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{run.triggerSource}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{formatDate(run.startedAt)}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{formatDate(run.finishedAt)}</td>
-                  <td className="max-w-[280px] truncate px-4 py-3 text-muted-foreground">
-                    {run.errorMessage || run.resultSummary || ""}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setSelectedRun(run)}
+        {activeView === "built-in" ? (
+          <section className="grid gap-3">
+            {builtInTasks.map(renderTask)}
+            {!builtInTasks.length && !error ? (
+              <div className="border border-border/70 bg-background px-4 py-6 text-sm text-muted-foreground">
+                No built-in tasks registered.
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {activeView === "runs" ? (
+          <section className="grid gap-3">
+            <div className="overflow-x-auto border border-border/70 bg-background">
+              <table className="w-full min-w-[760px] text-left text-sm">
+                <thead className="border-b border-border/70 bg-muted/40 text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">Task</th>
+                    <th className="px-4 py-3 font-medium">Run</th>
+                    <th className="px-4 py-3 font-medium">Status</th>
+                    <th className="px-4 py-3 font-medium">Source</th>
+                    <th className="px-4 py-3 font-medium">Started</th>
+                    <th className="px-4 py-3 font-medium">Finished</th>
+                    <th className="px-4 py-3 font-medium">Summary</th>
+                    <th className="px-4 py-3 font-medium text-right">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {runs.slice(0, 20).map((run) => (
+                    <tr
+                      key={run.id}
+                      className="border-b border-border/50 last:border-b-0"
                     >
-                      <Eye className="h-4 w-4" />
-                      View
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-              {!runs.length ? (
-                <tr>
-                  <td className="px-4 py-6 text-center text-muted-foreground" colSpan={7}>
-                    No task runs recorded yet.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
+                      <td className="px-4 py-3 font-medium">
+                        {run.taskKey ?? "unknown"}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+                        {run.agentRunId ? run.agentRunId.slice(0, 8) : "legacy"}
+                      </td>
+                      <td className="px-4 py-3">{statusBadge(run.status)}</td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {run.triggerSource}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {formatDate(run.startedAt)}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {formatDate(run.finishedAt)}
+                      </td>
+                      <td className="max-w-[280px] truncate px-4 py-3 text-muted-foreground">
+                        {run.errorMessage || run.resultSummary || ""}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setSelectedRun(run)}
+                        >
+                          <Eye className="h-4 w-4" />
+                          View
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                  {!runs.length ? (
+                    <tr>
+                      <td
+                        className="px-4 py-6 text-center text-muted-foreground"
+                        colSpan={8}
+                      >
+                        No task runs recorded yet.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : null}
       </section>
 
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
@@ -729,9 +925,9 @@ export function TaskRunnerWorkspace() {
           <DialogHeader>
             <DialogTitle>New Custom Task</DialogTitle>
             <DialogDescription>
-              Create a disabled scheduled prompt task. Use chat for tasks that need to
-              resolve output destinations like Discord channels, then enable after a
-              manual run succeeds.
+              Create a disabled scheduled prompt task. Use chat for tasks that
+              need to resolve output destinations like Discord channels, then
+              enable after a manual run succeeds.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4">
@@ -740,15 +936,31 @@ export function TaskRunnerWorkspace() {
               <Input
                 id="custom-task-name"
                 value={createForm.name}
-                onChange={(event) => setCreateForm((current) => ({ ...current, name: event.target.value }))}
+                onChange={(event) =>
+                  setCreateForm((current) => ({
+                    ...current,
+                    name: event.target.value,
+                  }))
+                }
                 placeholder="Daily memory brief"
               />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="custom-task-cron">Cron</Label>
               <Select
-                value={cronPresets.some((preset) => preset.value === createForm.scheduleCron.trim()) ? createForm.scheduleCron.trim() : ""}
-                onValueChange={(value) => setCreateForm((current) => ({ ...current, scheduleCron: value }))}
+                value={
+                  cronPresets.some(
+                    (preset) => preset.value === createForm.scheduleCron.trim(),
+                  )
+                    ? createForm.scheduleCron.trim()
+                    : ""
+                }
+                onValueChange={(value) =>
+                  setCreateForm((current) => ({
+                    ...current,
+                    scheduleCron: value,
+                  }))
+                }
               >
                 <SelectTrigger aria-label="Custom task cron preset">
                   <SelectValue placeholder="Choose a preset" />
@@ -764,10 +976,17 @@ export function TaskRunnerWorkspace() {
               <Input
                 id="custom-task-cron"
                 value={createForm.scheduleCron}
-                onChange={(event) => setCreateForm((current) => ({ ...current, scheduleCron: event.target.value }))}
+                onChange={(event) =>
+                  setCreateForm((current) => ({
+                    ...current,
+                    scheduleCron: event.target.value,
+                  }))
+                }
                 placeholder="0 9 * * *"
               />
-              <p className={`text-xs ${createCron.valid ? "text-muted-foreground" : "text-destructive"}`}>
+              <p
+                className={`text-xs ${createCron.valid ? "text-muted-foreground" : "text-destructive"}`}
+              >
                 {createCron.preview}
               </p>
             </div>
@@ -776,20 +995,34 @@ export function TaskRunnerWorkspace() {
               <Textarea
                 id="custom-task-prompt"
                 value={createForm.prompt}
-                onChange={(event) => setCreateForm((current) => ({ ...current, prompt: event.target.value }))}
+                onChange={(event) =>
+                  setCreateForm((current) => ({
+                    ...current,
+                    prompt: event.target.value,
+                  }))
+                }
                 rows={8}
                 placeholder="Create a concise daily brief from Prism Memory. Do not ask follow-up questions. Return the brief and a short summary of what sources you used."
               />
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsCreateOpen(false)}
+            >
               Cancel
             </Button>
             <Button
               type="button"
               onClick={createCustomTask}
-              disabled={isCreating || !createForm.name.trim() || !createCron.valid || !createForm.prompt.trim()}
+              disabled={
+                isCreating ||
+                !createForm.name.trim() ||
+                !createCron.valid ||
+                !createForm.prompt.trim()
+              }
             >
               <Plus className="h-4 w-4" />
               Create
@@ -808,7 +1041,8 @@ export function TaskRunnerWorkspace() {
           <DialogHeader>
             <DialogTitle>Task Run</DialogTitle>
             <DialogDescription>
-              {selectedRun?.taskKey ?? "unknown"} - {selectedRun?.triggerSource ?? "unknown"} -{" "}
+              {selectedRun?.taskKey ?? "unknown"} -{" "}
+              {selectedRun?.triggerSource ?? "unknown"} -{" "}
               {selectedRun ? formatDate(selectedRun.startedAt) : "Not recorded"}
             </DialogDescription>
           </DialogHeader>
@@ -816,7 +1050,14 @@ export function TaskRunnerWorkspace() {
             <div className="grid gap-4">
               <div className="flex flex-wrap items-center gap-2">
                 {statusBadge(selectedRun.status)}
-                <Badge variant="outline">{selectedRun.taskName ?? selectedRun.taskKey ?? "unknown"}</Badge>
+                <Badge variant="outline">
+                  {selectedRun.taskName ?? selectedRun.taskKey ?? "unknown"}
+                </Badge>
+                <Badge variant="outline">
+                  {selectedRun.agentRunId
+                    ? `agent run ${selectedRun.agentRunId}`
+                    : "legacy task run"}
+                </Badge>
               </div>
 
               {selectedRun.resultSummary ? (

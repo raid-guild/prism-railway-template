@@ -18,7 +18,7 @@ export async function readApiError(response: Response, fallback: string) {
 
 export function describeFetchError(error: unknown, fallback: string) {
   if (error instanceof TypeError && /fetch/i.test(error.message)) {
-    return `${fallback}: browser request failed before the server returned a response. This often means the long-running workflow request was interrupted by the browser, proxy, deploy restart, or network connection. Check the latest request execution log to see whether the agent run continued server-side.`;
+    return `${fallback}: browser request failed before the server returned a response. This often means the long-running request was interrupted by the browser, proxy, deploy restart, or network connection. Check the latest run or execution log to see whether the agent run continued server-side.`;
   }
   return error instanceof Error ? error.message : fallback;
 }

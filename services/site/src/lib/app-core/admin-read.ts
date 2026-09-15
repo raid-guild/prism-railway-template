@@ -1,5 +1,7 @@
 import { loadConfig } from './config';
-import { listChangeRequests, listTargetApps, listTargetEnvironments, listWorkflows } from './repository';
+import { listAgentRuns, listChangeRequests, listTargetApps, listTargetEnvironments, listWorkflows } from './repository';
+import { resolveRuntimeProfile } from './runtime-profiles';
+import { projectActiveRequestAgentRuns } from '../prism-lab/active-run-projection';
 
 async function fetchJson(baseUrl: string, path: string) {
   if (!baseUrl) {
@@ -34,10 +36,17 @@ async function fetchJson(baseUrl: string, path: string) {
 
 export async function getAdminSetupStatus() {
   const config = loadConfig();
+  const runtimeProfile = (() => {
+    try {
+      return resolveRuntimeProfile();
+    } catch {
+      return null;
+    }
+  })();
 
   const [prismMemory, codexRuntime] = await Promise.all([
     fetchJson(config.prismMemoryBaseUrl, '/health'),
-    fetchJson(config.codexRuntimeBaseUrl, '/health'),
+    fetchJson(runtimeProfile?.baseUrl ?? '', '/health'),
   ]);
 
   const codexPayload =
@@ -64,6 +73,8 @@ export async function getAdminSetupStatus() {
       error: codexRuntime.error,
       codexAuthConfigured: codexPayload.codexAuthConfigured === true,
       codexHome: typeof codexPayload.codexHome === 'string' ? codexPayload.codexHome : null,
+      runtimeKey: runtimeProfile?.key ?? null,
+      adapter: runtimeProfile?.adapter ?? null,
     },
     targets: {
       targetAppCount: listTargetApps().length,
@@ -76,6 +87,10 @@ export async function getAdminSetupStatus() {
 }
 
 export function getAdminBoardSnapshot(input: { targetAppId?: string } = {}) {
+  const activeRequestAgentRuns = projectActiveRequestAgentRuns(
+    ['queued', 'claimed', 'running'].flatMap((status) => listAgentRuns({ status, limit: 200 })),
+  );
+
   return {
     targetApps: listTargetApps(),
     targetEnvironments: listTargetEnvironments(input.targetAppId),
@@ -83,5 +98,6 @@ export function getAdminBoardSnapshot(input: { targetAppId?: string } = {}) {
       targetAppId: input.targetAppId,
     }),
     workflows: listWorkflows(),
+    activeRequestAgentRuns,
   };
 }

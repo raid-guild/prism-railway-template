@@ -1,7 +1,7 @@
 const defaultChangeRequestWorkflow = {
   key: "change-request-default",
   name: "Change Request",
-  version: 2,
+  version: 3,
   description: "Default human-reviewed request flow for repository-backed changes.",
   entrypoint: "triage",
   workflowPath: "workflows/change-request-default/workflow.md",
@@ -61,11 +61,7 @@ const defaultChangeRequestWorkflow = {
       label: "Review",
       type: "gate",
       instructionPath: "workflows/change-request-default/steps/review.md",
-      routes: {
-        approved: "closed",
-        changesRequested: "implement",
-        rejected: "closed",
-      },
+      next: "closed",
     },
     {
       key: "closed",
@@ -81,7 +77,7 @@ export const changeRequestPrReviewCheckpointMigration = {
   name: '017_change_request_pr_review_checkpoint',
   sql: `
     UPDATE workflows
-    SET version = 2,
+    SET version = 3,
         definition_json = '${escapedDefaultWorkflow}',
         updated_at = datetime('now')
     WHERE key = 'change-request-default'

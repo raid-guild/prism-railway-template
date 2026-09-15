@@ -1,6 +1,10 @@
 import { ChangeBoard } from "@/components/admin/change-board"
 import { LoginCard } from "@/components/admin/login-card"
 import { getAdminWorkspaceData } from "@/lib/admin"
+import Link from "next/link"
+import { redirect } from "next/navigation"
+import { shouldRedirectAdminToLab } from "@/lib/prism-lab/admin-entry"
+import { isPrismLabEnabled } from "@/lib/prism-lab/feature-flag"
 
 export default async function AdminPage({
   searchParams,
@@ -30,5 +34,15 @@ export default async function AdminPage({
     return <LoginCard error={error} />
   }
 
-  return <ChangeBoard data={board.data} initialTab={tabParam} />
+  if (shouldRedirectAdminToLab(resolvedSearchParams, process.env.PRISM_LAB_ENABLED)) {
+    redirect("/admin/lab")
+  }
+
+  return <>
+    {isPrismLabEnabled(process.env.PRISM_LAB_ENABLED) && <nav aria-label="Workspace switcher" className="border-b border-border bg-card px-5 py-3 text-sm">
+      <span className="text-muted-foreground">Legacy workspace · settings and configuration remain available here.</span>{" "}
+      <Link href="/admin/lab" className="text-primary underline">Return to Prism Lab</Link>
+    </nav>}
+    <ChangeBoard data={board.data} initialTab={tabParam} />
+  </>
 }

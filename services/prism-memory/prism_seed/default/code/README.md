@@ -107,16 +107,51 @@ GitHub backup/push uses `GITHUB_OWNER`, `GITHUB_REPO`, and `GITHUB_TOKEN` (alrea
 The CLI autoloads repo-root `.env` values if present.
 Use `.env.example` as a template.
 
-## Canonical Discord Bucket Mapping
+## Discord Bucket Mapping
 
-`prism_seed/default/config/space.json` is the source of truth:
+The starter `space.json` intentionally does not ship community-specific Discord category IDs. Configure `discord.category_to_bucket` per instance after the Discord adapter is connected.
 
-- `684227450955235329` → `townsquare`
-- `685273857338376246` → `guildhq`
-- `1470894727342723082` → `governance`
-- `1009434800676946022` → `cohort`
-- `1470888731241087128` → `agency`
-- `724249951005179915` → `knowledge`
+Use the source adapter inventory endpoint to inspect the live server structure:
+
+```bash
+curl -fsSL \
+  -H "X-Adapter-Token: $COMMUNICATION_ADAPTER_TOKEN" \
+  "$COMMUNICATION_ADAPTER_BASE_URL/guild/channels"
+```
+
+Then map each relevant category ID to a local bucket name. Use `mappingCandidates[].id` or `categories[].id` from the adapter response as the default `discord.category_to_bucket` keys. Do not map every child channel ID; child channels inherit through their category. Use channel IDs only for truly uncategorized channels that need their own bucket. Do not reuse category IDs from another community.
+
+After changing `discord.category_to_bucket` on an instance that already collected Discord messages, repair the existing derived memory files before trusting latest memory. The ingest log and raw windows are persistent, so config changes only affect future messages unless historical raw windows are reclassified and rebuilt.
+
+Recommended repair sequence:
+
+```bash
+# 1. Inspect the current Discord category/channel tree.
+curl -fsSL \
+  -H "X-Adapter-Token: $COMMUNICATION_ADAPTER_TOKEN" \
+  "$COMMUNICATION_ADAPTER_BASE_URL/guild/channels"
+
+# 2. Patch /config/space with the corrected discord.category_to_bucket mapping.
+
+# 3. Dry-run historical reclassification.
+curl -fsSL \
+  -X POST \
+  -H "content-type: application/json" \
+  -H "X-Prism-Api-Key: $PRISM_API_OPS_KEY" \
+  "$PRISM_MEMORY_BASE_URL/ops/memory/repair-discord-buckets" \
+  -d '{"from_date":"YYYY-MM-DD","to_date":"YYYY-MM-DD","dry_run":true}'
+
+# 4. Execute once the dry-run looks right. This reclassifies raw windows and
+# force-rebuilds affected digests, rolling memory, and product seeds.
+curl -fsSL \
+  -X POST \
+  -H "content-type: application/json" \
+  -H "X-Prism-Api-Key: $PRISM_API_OPS_KEY" \
+  "$PRISM_MEMORY_BASE_URL/ops/memory/repair-discord-buckets" \
+  -d '{"from_date":"YYYY-MM-DD","to_date":"YYYY-MM-DD","dry_run":false,"rebuild":true}'
+```
+
+The repair endpoint uses saved Discord metadata such as `parentCategoryId`, `parentChannelId`, and `channelId`; it does not delete the append-only ingest/activity history. Files that contain messages mapping to multiple buckets are reported as `split_required` and skipped for manual follow-up.
 
 Additional collector bucket:
 - `inbox_memory` → bucket from inbox payload `bucket_hint` (default from `config.space.json.inbox.memory.default_bucket`)

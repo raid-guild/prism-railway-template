@@ -180,7 +180,24 @@ When a hook creates a request:
 - the raw payload is saved as a `hook-payload.json` artifact with kind `hook-payload`
 - auto-run starts from the workflow entrypoint when `autoRun.enabled` is true
 
-Hooks default to service-token auth in the first implementation. The browser admin UI exposes a Hooks tab for inspection, enable/disable, deletion of custom hooks, endpoint copy, and manual test triggering.
+Hooks default to `service-token` auth. The internal service token can trigger
+every enabled hook. A hook may opt into `interface-token` auth with an
+`authConfig.interfaceKey`; the configured external interface credential may
+then trigger only that hook, while service-token access remains available.
+Interaction profile modes govern chat and do not authorize hooks.
+
+Interface-authenticated hooks can expose selected workflow results without
+granting general request access. List safe artifact names in
+`authConfig.resultArtifactNames`, then poll:
+
+```text
+GET /agent/hooks/<hook-key>/requests/<request-number>/result
+```
+
+The route returns HTTP 202 while the workflow is active and returns only a
+configured result artifact after completion. The browser admin UI exposes a
+Hooks tab for inspection, enable/disable, deletion of custom hooks, endpoint
+copy, and manual test triggering.
 
 See `docs/architecture/hooks.md` for the full hook model.
 
@@ -208,10 +225,14 @@ The schema is descriptive and intentionally narrow. The default request workflow
 Supported step types:
 
 - `agent`: call Codex Runtime with prompt, context, skills, and target metadata. Agent steps auto-continue until the workflow reaches a gate, checkpoint, or terminal step.
-- `gate`: wait for a human decision. Continuing a gate routes through the manifest using a workflow action such as `approved` or `changesRequested`.
+- `gate`: wait for a human decision. Continuing a gate records the decision context and moves to the gate's `next` step.
 - `checkpoint`: pause until an operator asks the agent to check external state. Checkpoints run their own markdown instructions and stay on the checkpoint after the check, so they work for long-running renders, PR review checks, deployment checks, and other “look before doing more” moments. If the checkpoint is ready to continue, the agent should say which next step should run and why.
 - `command`: run a reviewed script or service command.
 - `handoff`: move work to a channel, target, or person.
+- `loop`: planned control-flow step that evaluates structured workflow state,
+  such as a checklist artifact, and routes back to a target step until an exit
+  condition or safety cap is reached. See
+  [Workflow Loop Nodes](../features/workflow-loop-nodes.md).
 - `subworkflow`: start another workflow run.
 - `wait`: pause until an external signal, time, or status.
 - `terminal`: close the run.
@@ -274,13 +295,14 @@ Put the judgment about when to delegate in the step markdown. For the default re
 
 ## Runtime State
 
-Workflow definitions are files and manifests. Workflow execution state is DB-backed.
+Workflow definitions are files and manifests. Workflow run state is DB-backed.
 
 The runtime tables are:
 
 - `workflow_runs`: one durable run per request, including current step and workflow key.
 - `workflow_events`: append-only history for workflow start, step changes, gate decisions, agent start, agent completion, and agent failure.
-- `change_request_executions`: concrete Codex execution records with branch, commit, trace, and summary.
+- `agent_runs`: concrete agent, task, hook, and console runs with status, idempotency, trace, and structured results.
+- `change_request_executions`: legacy request execution history retained for older requests only.
 - `request_artifacts`: files produced by workflow steps, with metadata in SQLite and file bytes stored under the site data volume.
 
 Request progress comes from `workflow_runs.current_step_key` and terminal workflow state. The board should not maintain a separate request status field.
@@ -415,30 +437,29 @@ x-service-token: <internal-service-token>
       "content": "Run the current workflow step for request #3 using the request description and workflow step instructions."
     }
   ],
-  "linked_change_request_id": "<request-id>",
-  "workflow_action": null
+  "linked_change_request_id": "<request-id>"
 }
 ```
 
-For a gate step, set `workflow_action` to `approved`, `changesRequested`, or another route key defined by the workflow manifest. The route records workflow events and execution rows.
+For gate steps, omit `workflow_action`; continuing a gate records the event and moves to the gate's `next` step. The route records workflow events and creates or reuses agent runs.
 
-## Execution Flow
+## Agent Run Flow
 
 The workflow-aware request flow is:
 
-1. The admin UI sends `/admin/responses` with the operator prompt and optional `workflow_action`; service-token callers use `/agent/responses`.
+1. The admin UI sends `/admin/responses` with the operator prompt; service-token callers use `/agent/responses`.
 2. `site` loads the request, workflow definition, workflow run, current step, and step markdown.
-3. Gate actions are recorded as `workflow_events` and routed through the manifest.
+3. Gate continues are recorded as `workflow_events` and move through the manifest `next` flow.
 4. Agent steps merge workflow-level and step-level `agentConfig`.
 5. `site` calls `codex-runtime` with workflow metadata and the step instructions.
-6. The response is recorded in `change_request_executions`.
+6. The response, branch, commit, trace, and errors are recorded in `agent_runs.result` and `agent_runs.trace`.
 7. The workflow run advances and workflow events are appended. Checkpoint steps are the exception: the check is recorded, but the workflow stays on the checkpoint until an operator moves or continues it.
 
-`change_request_executions` remains the record of concrete Codex runs: branch, commit, response text, runtime trace, deploy URL, and execution metadata. `workflow_events` is the higher-level workflow timeline.
+`agent_runs` is the record of concrete Codex runs: branch, commit, response text, runtime trace, deploy URL, and run metadata. `workflow_events` is the higher-level workflow timeline. `change_request_executions` may appear in API payloads as `legacyExecutions` for old request history, but new workflow-step runs should not create mirrored execution rows.
 
-The admin UI uses one primary step action. It runs the current agent step, or checks the current checkpoint step, and automatically continues through following `agent` steps until the workflow reaches a `gate`, `checkpoint`, `terminal` step, failure, or the server-side continuation cap.
+The admin UI uses one primary step action. It runs the current agent step, continues a gate, or checks the current checkpoint step, and automatically continues through following `agent` steps until the workflow reaches a `gate`, `checkpoint`, `terminal` step, failure, or the emergency continuation guard.
 
-Gate actions such as approval or requested changes use the same run-until-gate behavior after routing, so a review approval can continue into the next agent step without extra button presses while still stopping at the next human decision or checkpoint.
+Gate continues use the same run-until-gate behavior, so an approval can continue into the next agent step without extra button presses while still stopping at the next human decision or checkpoint.
 
 ## Migrations
 

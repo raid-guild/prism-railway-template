@@ -111,6 +111,36 @@ Expected:
 "discordReady": true
 ```
 
+After the adapter is healthy, inspect the live Discord server structure before enabling sync:
+
+```bash
+curl -fsSL \
+  -H "X-Adapter-Token: $COMMUNICATION_ADAPTER_TOKEN" \
+  "$COMMUNICATION_ADAPTER_BASE_URL/guild/channels"
+```
+
+Use that inventory to configure the instance-specific Prism Memory `discord.category_to_bucket` mapping. Prefer `mappingCandidates[].id` or `categories[].id` as keys because those are Discord category IDs. Do not map every child channel ID; child channels inherit through their category. Use channel IDs only for truly uncategorized channel exceptions. The template does not ship category IDs because Discord category IDs are unique to each community.
+
+If the instance already collected Discord messages before the mapping was corrected, repair the existing memory files after patching config:
+
+```bash
+curl -fsSL \
+  -X POST \
+  -H "content-type: application/json" \
+  -H "X-Prism-Api-Key: $PRISM_API_OPS_KEY" \
+  "$PRISM_MEMORY_BASE_URL/ops/memory/repair-discord-buckets" \
+  -d '{"from_date":"YYYY-MM-DD","to_date":"YYYY-MM-DD","dry_run":true}'
+
+curl -fsSL \
+  -X POST \
+  -H "content-type: application/json" \
+  -H "X-Prism-Api-Key: $PRISM_API_OPS_KEY" \
+  "$PRISM_MEMORY_BASE_URL/ops/memory/repair-discord-buckets" \
+  -d '{"from_date":"YYYY-MM-DD","to_date":"YYYY-MM-DD","dry_run":false,"rebuild":true}'
+```
+
+The repair keeps ingest/activity history intact, reclassifies raw windows using saved Discord channel metadata, and force-rebuilds affected digests, rolling memory, and seeds.
+
 ## 7. Enable Discord Sync Cron
 
 `discord-sync-cron` deploys disabled by default:
@@ -208,8 +238,11 @@ Use these blocks in the Railway template composer raw variable editor when descr
 PORT="3100" # Port the site service listens on.
 NODE_ENV="production" # Runtime environment for the site service.
 NEXT_PUBLIC_API_BASE_URL="https://${{site.RAILWAY_PUBLIC_DOMAIN}}" # Browser-facing API URL used by the site.
+NEXT_PUBLIC_INTERACTION_BASE_URL="https://${{discord-adapter.RAILWAY_PUBLIC_DOMAIN}}" # Browser-visible base URL used to display callable external interaction endpoints.
 API_INTERNAL_BASE_URL="http://${{site.RAILWAY_PRIVATE_DOMAIN}}:${{site.PORT}}" # Server-side API URL used by the site.
+COMMUNICATION_ADAPTER_BASE_URL="http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}" # Private communication adapter URL used by Site server routes.
 SITE_USE_LOCAL_APP_API="true" # Site owns the app API and SQLite runtime state.
+PRISM_LAB_ENABLED="false" # Opt-in Lab rollout. Set exactly true only for intentional field testing.
 PRISM_AGENT_DATA_ROOT="/data" # Mounted data directory for site runtime state.
 ADMIN_EMAIL="admin@local.agent" # Initial admin account email.
 ADMIN_PASSWORD="changeme" # Temporary admin password; change after deploy.
@@ -284,8 +317,8 @@ PRISM_API_BASE="http://${{prism-memory.RAILWAY_PRIVATE_DOMAIN}}:${{prism-memory.
 PRISM_API_KEY="${{prism-memory.PRISM_API_KEY}}" # Prism Memory API key reference.
 APP_API_BASE_URL="http://${{site.RAILWAY_PRIVATE_DOMAIN}}:${{site.PORT}}" # Private URL for the site-owned app API using its internal port.
 APP_API_SERVICE_TOKEN="${{site.INTERNAL_SERVICE_TOKEN}}" # Internal site service token reference.
-OUTPUT_ADAPTER_BASE_URL="http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}" # Private URL for output adapter destination lookup and direct message sends from Codex agents.
-OUTPUT_ADAPTER_TOKEN="${{discord-adapter.SOURCE_ADAPTER_TOKEN}}" # Shared adapter token sent as X-Adapter-Token for direct output adapter calls.
+COMMUNICATION_ADAPTER_BASE_URL="http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}" # Private URL for communication adapter destination lookup and direct message sends from Codex agents.
+COMMUNICATION_ADAPTER_TOKEN="${{discord-adapter.SOURCE_ADAPTER_TOKEN}}" # Shared adapter token sent as X-Adapter-Token for direct communication adapter calls.
 TARGET_REPO_GITHUB_TOKEN="" # Optional GitHub token for cloning or pushing private target repositories.
 GIT_AUTHOR_NAME="Prism Codex" # Git author name used for Codex-created commits.
 GIT_AUTHOR_EMAIL="prism-codex@users.noreply.github.com" # Git author email used for Codex-created commits.

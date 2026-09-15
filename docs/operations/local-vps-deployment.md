@@ -36,6 +36,58 @@ Those Railway features are conveniences, not hard requirements.
 
 ## Local Development
 
+### One-command local instance
+
+The Compose-backed local instance keeps the Prism control plane in containers
+and runs AI harness adapters on the host so they can use the operator's normal
+authentication and local repositories. At least one authenticated Codex CLI or
+Grok Build installation is required. Detected adapters are registered
+automatically, and the first-run selection becomes the default profile.
+
+Prerequisites:
+
+- Node.js 20 or newer
+- Docker with the Compose plugin
+- repository dependencies installed with `npm install`
+- at least one supported runtime: Codex CLI or Grok Build, installed and authenticated
+
+Initialize and start:
+
+```bash
+npm run local:init
+npm run local:up
+```
+
+The first command prints the generated local admin credentials once. Internal
+service tokens and encryption keys are written with restrictive permissions
+under `~/.local/share/prism/instances/default`. Provider credentials are not
+stored there; add them through **Settings > Gateway** after login.
+
+Common lifecycle commands:
+
+```bash
+npm run local:status
+npm run local:doctor
+npm run local:logs
+npm run local:down
+```
+
+When both runtimes are available, `local:init` or the first `local:up` asks
+which should be the default. Non-interactive setup chooses the first detected
+runtime unless `PRISM_LOCAL_DEFAULT_RUNTIME=codex-default` or
+`PRISM_LOCAL_DEFAULT_RUNTIME=grok-local` is set. Change the active default later
+under **Settings > Runtimes**. Use `npm run local:logs -- grok` for the Grok
+adapter log. Runtime provider credentials remain in `~/.codex` and `~/.grok`;
+Prism does not copy them into its local instance directory.
+After initial registration, Site owns the active default, so changes made in
+Settings survive later `local:up` restarts.
+
+Set `PRISM_LOCAL_INSTANCE` to operate more than one named local instance, or
+`PRISM_LOCAL_HOME` to move local instance data. The Compose services bind to
+loopback by default.
+
+### Contributor development
+
 Use the repo bootstrap first:
 
 ```bash
@@ -70,8 +122,11 @@ Default local ports:
 
 - `site`: `3100`
 - `codex-runtime`: `3030`
+- `grok-runtime`: `3031` when Grok is installed
 - `prism-memory`: `8788`
 - `discord-adapter`: `8789`
+- `task-runner`: `8790`
+- `prism-gateway`: `8794`
 
 Run the whole stack:
 

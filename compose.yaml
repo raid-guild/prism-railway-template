@@ -1,0 +1,135 @@
+name: ${COMPOSE_PROJECT_NAME:-prism-local}
+
+services:
+  prism-gateway:
+    build:
+      context: ./services/prism-gateway
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 8794
+      GATEWAY_DATA_ROOT: /data
+      GATEWAY_MASTER_ENCRYPTION_KEY: ${GATEWAY_MASTER_ENCRYPTION_KEY}
+      GATEWAY_MASTER_KEY_VERSION: v1
+      GATEWAY_SITE_TOKEN: ${GATEWAY_SITE_TOKEN}
+      GATEWAY_CODEX_RUNTIME_TOKEN: ${GATEWAY_CODEX_RUNTIME_TOKEN}
+      GATEWAY_CODEX_RUNTIME_KEY: codex-default
+      GATEWAY_TASK_RUNNER_TOKEN: ${GATEWAY_TASK_RUNNER_TOKEN}
+    ports:
+      - "127.0.0.1:${PRISM_GATEWAY_PORT:-8794}:8794"
+    volumes:
+      - ${PRISM_LOCAL_DATA_DIR}/gateway:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8794/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  prism-memory:
+    build:
+      context: ./services/prism-memory
+    restart: unless-stopped
+    environment:
+      PORT: 8788
+      PRISM_API_DATA_ROOT: /data
+      PRISM_API_SPACE: ${PRISM_API_SPACE:-community}
+      PRISM_API_KEY: ${PRISM_API_KEY}
+      PRISM_API_READ_KEY: ${PRISM_API_KEY}
+      PRISM_API_WRITE_KEY: ${PRISM_API_KEY}
+      PRISM_API_OPS_KEY: ${PRISM_API_KEY}
+    ports:
+      - "127.0.0.1:${PRISM_API_PORT:-8788}:8788"
+    volumes:
+      - ${PRISM_LOCAL_DATA_DIR}/memory:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8788/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  site:
+    build:
+      context: .
+      dockerfile: docker/site.Dockerfile
+      args:
+        PRISM_BUILD_SHA: ${PRISM_BUILD_SHA:-unknown}
+        PRISM_BUILD_BRANCH: ${PRISM_BUILD_BRANCH:-unknown}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3100
+      PRISM_AGENT_DATA_ROOT: /data
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      ADMIN_SESSION_SECRET: ${SESSION_SECRET}
+      SESSION_SECRET: ${SESSION_SECRET}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      APP_API_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      SITE_USE_LOCAL_APP_API: "true"
+      PRISM_BUILD_SHA: ${PRISM_BUILD_SHA:-unknown}
+      PRISM_BUILD_BRANCH: ${PRISM_BUILD_BRANCH:-unknown}
+      NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:${SITE_PORT:-3100}
+      NEXT_PUBLIC_SITE_URL: http://127.0.0.1:${SITE_PORT:-3100}
+      PUBLIC_SITE_URL: http://127.0.0.1:${SITE_PORT:-3100}
+      PRISM_MEMORY_BASE_URL: http://prism-memory:8788
+      PRISM_MEMORY_PUBLIC_BASE_URL: http://127.0.0.1:${PRISM_API_PORT:-8788}
+      PRISM_API_READ_KEY: ${PRISM_API_KEY}
+      CODEX_RUNTIME_BASE_URL: http://host.docker.internal:${CODEX_RUNTIME_PORT:-3030}
+      PRISM_GATEWAY_ENABLED: "true"
+      PRISM_GATEWAY_BASE_URL: http://prism-gateway:8794
+      PRISM_GATEWAY_TOKEN: ${GATEWAY_SITE_TOKEN}
+      PRISM_GATEWAY_DEFAULT_RUNTIME_KEY: codex-default
+      TASK_RUNNER_BASE_URL: http://task-runner:8790
+      TASK_RUNNER_TOKEN: ${TASK_RUNNER_TOKEN}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:${SITE_PORT:-3100}:3100"
+    volumes:
+      - ${PRISM_LOCAL_DATA_DIR}/site:/data
+    depends_on:
+      prism-gateway:
+        condition: service_healthy
+      prism-memory:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  task-runner:
+    build:
+      context: ./services/task-runner
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 8790
+      APP_API_BASE_URL: http://site:3100
+      APP_API_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      CODEX_RUNTIME_BASE_URL: http://host.docker.internal:${CODEX_RUNTIME_PORT:-3030}
+      PRISM_MEMORY_BASE_URL: http://prism-memory:8788
+      PRISM_API_BASE: http://prism-memory:8788
+      PRISM_API_KEY: ${PRISM_API_KEY}
+      TASK_RUNNER_TOKEN: ${TASK_RUNNER_TOKEN}
+      TASK_RUNNER_POLL_SECONDS: ${TASK_RUNNER_POLL_SECONDS:-60}
+      PRISM_GATEWAY_ENABLED: "true"
+      PRISM_GATEWAY_BASE_URL: http://prism-gateway:8794
+      PRISM_GATEWAY_TOKEN: ${GATEWAY_TASK_RUNNER_TOKEN}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:${TASK_RUNNER_PORT:-8790}:8790"
+    depends_on:
+      site:
+        condition: service_healthy
+      prism-memory:
+        condition: service_healthy
+      prism-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8790/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20

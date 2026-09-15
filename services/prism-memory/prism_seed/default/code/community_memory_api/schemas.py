@@ -146,10 +146,14 @@ class MemoryInboxRequest(BaseModel):
     url: Optional[str] = None
     participants: Optional[list[str]] = None
     participant_count: Optional[int] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class MemoryInboxResponse(BaseModel):
     path: str
+    artifact_id: str
+    status: str = "incoming"
+    artifact_url: str
 
 
 class ArtifactSummary(BaseModel):
@@ -199,6 +203,44 @@ class StateProjectUpsertResponse(BaseModel):
     project: Dict[str, Any]
 
 
+class StateThroughlinePatchRequest(BaseModel):
+    throughline_key: Optional[str] = Field(
+        default=None,
+        description="Optional new key for rename operations. Slug-safe values are normalized.",
+    )
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    status: Optional[str] = Field(default=None, description="active, watching, inactive, or archived")
+    kind: Optional[str] = None
+    aliases: Optional[list[str]] = None
+    tags: Optional[list[str]] = None
+    owners: Optional[list[str]] = None
+    objective_keys: Optional[list[str]] = None
+    external_refs: Optional[list[Dict[str, Any]]] = None
+    pinned: Optional[bool] = None
+    archived: Optional[bool] = None
+    hidden: Optional[bool] = None
+    notes: Optional[str] = None
+
+
+class StateThroughlineMergeRequest(BaseModel):
+    target_key: str = Field(..., description="Throughline key that should receive the source throughline")
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    aliases: Optional[list[str]] = None
+    reason: Optional[str] = None
+
+
+class StateThroughlineMutationResponse(BaseModel):
+    path: str
+    curation_path: str
+    latest_path: str
+    throughline_key: str
+    updated_at: str
+    throughline: Optional[Dict[str, Any]] = None
+    curation: Dict[str, Any]
+
+
 class ParticipantActivityEntry(BaseModel):
     participant: str
     message_count: int
@@ -239,6 +281,35 @@ class OpsBackfillResponse(BaseModel):
     days: int
     collect: OpsResponse
     results: list[OpsResponse]
+
+
+class DiscordBucketRepairRequest(BaseModel):
+    from_date: str = Field(..., description="Inclusive YYYY-MM-DD start date")
+    to_date: str = Field(..., description="Inclusive YYYY-MM-DD end date")
+    dry_run: bool = True
+    category_to_bucket: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="Optional mapping override. Defaults to active config.discord.category_to_bucket.",
+    )
+    rebuild: bool = True
+
+
+class DiscordBucketRepairResponse(BaseModel):
+    ok: bool
+    operation: str = "memory.repair_discord_buckets"
+    dry_run: bool
+    start_date: str
+    end_date: str
+    scanned_files: int
+    reclassified_files: int
+    unchanged_files: int
+    unmapped_files: int
+    split_required_files: int
+    affected_dates: list[str]
+    affected_buckets: list[str]
+    changes: list[Dict[str, Any]]
+    warnings: list[str] = Field(default_factory=list)
+    rebuild_results: list[OpsResponse] = Field(default_factory=list)
 
 
 class SpaceConfigUpdateRequest(BaseModel):

@@ -40,6 +40,11 @@ Use this to update the Railway template and migrate existing instances from the 
 
 Set these on `task-runner`:
 
+- [ ] `PRISM_GATEWAY_ENABLED=true` when script-runner tasks use connected services.
+- [ ] `PRISM_GATEWAY_BASE_URL=http://${{prism-gateway.RAILWAY_PRIVATE_DOMAIN}}:${{prism-gateway.PORT}}`.
+- [ ] `PRISM_GATEWAY_TOKEN=${{prism-gateway.GATEWAY_TASK_RUNNER_TOKEN}}`.
+- [ ] Gateway has a distinct generated `GATEWAY_TASK_RUNNER_TOKEN`; do not reuse Site or runtime tokens.
+
 ```text
 PORT="8790"
 TASK_RUNNER_DISABLED="false"
@@ -47,10 +52,8 @@ TASK_RUNNER_POLL_SECONDS="60"
 TASK_RUNNER_TOKEN="${{site.INTERNAL_SERVICE_TOKEN}}"
 APP_API_BASE_URL="http://${{site.RAILWAY_PRIVATE_DOMAIN}}:${{site.PORT}}"
 APP_API_SERVICE_TOKEN="${{site.INTERNAL_SERVICE_TOKEN}}"
-DISCORD_ADAPTER_BASE_URL="http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}"
-SOURCE_ADAPTER_TOKEN="${{discord-adapter.SOURCE_ADAPTER_TOKEN}}"
-OUTPUT_ADAPTER_BASE_URL="http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}"
-OUTPUT_ADAPTER_TOKEN="${{discord-adapter.SOURCE_ADAPTER_TOKEN}}"
+COMMUNICATION_ADAPTER_BASE_URL="http://${{discord-adapter.RAILWAY_PRIVATE_DOMAIN}}:${{discord-adapter.PORT}}"
+COMMUNICATION_ADAPTER_TOKEN="${{discord-adapter.SOURCE_ADAPTER_TOKEN}}"
 PRISM_MEMORY_BASE_URL="http://${{prism-memory.RAILWAY_PRIVATE_DOMAIN}}:${{prism-memory.PORT}}"
 PRISM_API_KEY="${{prism-memory.PRISM_API_KEY}}"
 CODEX_RUNTIME_BASE_URL="http://${{codex-runtime.RAILWAY_PRIVATE_DOMAIN}}:${{codex-runtime.PORT}}"

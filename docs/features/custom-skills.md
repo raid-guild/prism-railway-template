@@ -39,7 +39,7 @@ Payload:
 }
 ```
 
-The skill then appears in the admin Skills tab and is available through the same site-hosted skill download flow used by `codex-runtime`.
+The skill then appears in the admin Skills tab and is available through the same site-hosted skill download flow used by `codex-runtime`. Interactive full-authority runtime sessions expose these bundles through Codex's native skill discovery, so Codex can match the user's request against skill descriptions and load the full instructions only when needed. Exact deterministic runs remain limited to their configured skill list.
 
 Custom skills can be removed by name through the same internal API:
 

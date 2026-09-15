@@ -6,6 +6,7 @@ import {
   createRequestArtifact,
   deleteRequestArtifact,
   deleteRequestArtifactFile,
+  getAgentRun,
   getChangeRequest,
   getChangeRequestExecution,
   getWorkflowRun,
@@ -99,6 +100,7 @@ export async function POST(request: Request, context: RouteContext) {
   const storagePath = buildRequestArtifactStoragePath({ requestId, artifactId, name })
   const workflowRunId = parseString(body.workflowRunId ?? body.workflow_run_id) || null
   const executionId = parseString(body.executionId ?? body.execution_id) || null
+  const agentRunId = parseString(body.agentRunId ?? body.agent_run_id) || null
 
   if (workflowRunId) {
     const workflowRun = getWorkflowRun(workflowRunId)
@@ -114,10 +116,18 @@ export async function POST(request: Request, context: RouteContext) {
     }
   }
 
+  if (agentRunId) {
+    const agentRun = getAgentRun(agentRunId)
+    if (!agentRun || agentRun.requestId !== requestId) {
+      return NextResponse.json({ ok: false, error: "Invalid agentRunId" }, { status: 400 })
+    }
+  }
+
   try {
     await writeRequestArtifactFile(storagePath, content)
     const artifact = createRequestArtifact({
       id: artifactId,
+      agentRunId,
       requestId,
       workflowRunId,
       executionId,
@@ -140,6 +150,7 @@ export async function POST(request: Request, context: RouteContext) {
         actorType: "agent",
         payload: {
           artifactId: artifact.id,
+          agentRunId: artifact.agentRunId,
           kind: artifact.kind,
           name: artifact.name,
           mimeType: artifact.mimeType,

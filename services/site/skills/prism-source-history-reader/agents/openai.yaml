@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prism Source History Reader"
+  short_description: "Search history with coverage-aware citations"
+  default_prompt: "Use $prism-source-history-reader to find primary evidence in configured source history."

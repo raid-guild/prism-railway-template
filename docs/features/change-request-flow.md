@@ -117,13 +117,13 @@ PR environment notes:
 
 ```mermaid
 flowchart TD
-    A[in-progress execution] --> B{Run succeeded?}
-    B -- No --> C[Execution marked failed]
+    A[in-progress agent run] --> B{Run succeeded?}
+    B -- No --> C[Agent run marked failed]
     C --> D[Request stays on current workflow step]
     D --> E[Admin reviews logs and comments]
     E --> F[Continue agent]
     F --> A
-    B -- Yes --> G[Execution completed]
+    B -- Yes --> G[Agent run completed]
     G --> H[Workflow advances to next step or gate]
 ```
 
@@ -141,7 +141,7 @@ erDiagram
     WORKFLOW ||--o{ WORKFLOW_RUN : has
     WORKFLOW_RUN ||--o{ WORKFLOW_EVENT : records
     CHANGE_REQUEST ||--|| WORKFLOW_RUN : drives
-    CHANGE_REQUEST ||--o{ CHANGE_REQUEST_EXECUTION : has
+    CHANGE_REQUEST ||--o{ AGENT_RUN : has
     CHANGE_REQUEST }o--|| TARGET_APP : targets
     CHANGE_REQUEST }o--|| TARGET_ENVIRONMENT : runs_in
     CHANGE_REQUEST ||--o{ AGENT_SESSION : links
@@ -179,13 +179,14 @@ erDiagram
       string targetEnvironmentId
     }
 
-    CHANGE_REQUEST_EXECUTION {
+    AGENT_RUN {
       string id
+      string kind
       string status
-      string branchName
-      string commitSha
-      string deployUrl
-      json meta
+      string requestId
+      string workflowKey
+      string workflowStepKey
+      json result
     }
 
     TARGET_APP {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { getDb } from "@/lib/app-core"
+import { currentPrismBuild } from "@/lib/prism-version"
 
 export function GET() {
   const dbRow = getDb()
@@ -11,6 +12,7 @@ export function GET() {
     ok: true,
     service: "prism-agent",
     authMode: "opaque-cookie-session",
+    build: currentPrismBuild(),
     appliedMigrations: dbRow.count,
     startupMigrations: [],
   })

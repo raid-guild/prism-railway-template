@@ -1,18 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 import hashlib
 import html
 import logging
 import os
+import re
 import secrets
 import sys
 import time
 import io
 import tarfile
 from datetime import datetime, timedelta, timezone
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 import shutil
 from typing import Callable, Optional
@@ -159,6 +161,9 @@ def create_app(settings: Settings) -> FastAPI:
         except Exception:
             return _load_config(bundled_config_path)
 
+    def _load_active_config_dict() -> dict:
+        return asdict(_load_active_config())
+
     def _now_iso() -> str:
         return datetime.now(timezone.utc).isoformat()
 
@@ -242,6 +247,137 @@ def create_app(settings: Settings) -> FastAPI:
             else:
                 merged[key] = value
         return merged
+
+    def _parse_local_date(value: str, *, field: str):
+        try:
+            return datetime.strptime(value, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"{field} must be YYYY-MM-DD") from exc
+
+    def _validate_bucket_name(value: str) -> str:
+        bucket = value.strip()
+        if not re.fullmatch(r"[a-z0-9_-]+", bucket):
+            raise HTTPException(status_code=400, detail=f"Invalid bucket name: {value}")
+        return bucket
+
+    def _discord_mapping_from_request(mapping: Optional[dict[str, str]]) -> dict[str, str]:
+        source = mapping
+        if source is None:
+            active = _load_active_config_dict()
+            discord = active.get("discord") if isinstance(active.get("discord"), dict) else {}
+            source = discord.get("category_to_bucket") if isinstance(discord.get("category_to_bucket"), dict) else {}
+        cleaned: dict[str, str] = {}
+        for raw_key, raw_bucket in dict(source or {}).items():
+            key = str(raw_key).strip()
+            if not key:
+                continue
+            cleaned[key] = _validate_bucket_name(str(raw_bucket))
+        return cleaned
+
+    def _raw_window_paths_for_dates(start_date, end_date) -> list[Path]:
+        buckets_dir = data_root / "buckets"
+        if not buckets_dir.is_dir():
+            return []
+        paths: list[Path] = []
+        current = start_date
+        while current <= end_date:
+            paths.extend(sorted(buckets_dir.glob(f"*/raw/{current.isoformat()}/*.json")))
+            current += timedelta(days=1)
+        return sorted(paths)
+
+    def _message_mapping_ids(channel: dict, message: dict) -> list[str]:
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        candidates = [
+            metadata.get("parentCategoryId"),
+            metadata.get("parent_category_id"),
+            message.get("parentCategoryId"),
+            message.get("parent_category_id"),
+            channel.get("parentCategoryId"),
+            channel.get("parent_category_id"),
+            metadata.get("parentChannelId"),
+            metadata.get("parent_channel_id"),
+            message.get("parentChannelId"),
+            message.get("parent_channel_id"),
+            channel.get("parentChannelId"),
+            channel.get("parent_channel_id"),
+            channel.get("category_id"),
+            metadata.get("channelId"),
+            metadata.get("channel_id"),
+            message.get("channelId"),
+            message.get("channel_id"),
+            channel.get("channel_id"),
+        ]
+        seen: set[str] = set()
+        ids: list[str] = []
+        for candidate in candidates:
+            value = str(candidate or "").strip()
+            if value and value not in seen:
+                ids.append(value)
+                seen.add(value)
+        return ids
+
+    def _target_bucket_for_raw_window(payload: dict, mapping: dict[str, str]) -> tuple[str | None, bool]:
+        targets: set[str] = set()
+        channels = payload.get("channels", [])
+        if not isinstance(channels, list):
+            return None, False
+        for channel in channels:
+            if not isinstance(channel, dict):
+                continue
+            messages = channel.get("messages", [])
+            if not isinstance(messages, list):
+                continue
+            for message in messages:
+                if not isinstance(message, dict):
+                    continue
+                for candidate in _message_mapping_ids(channel, message):
+                    if candidate in mapping:
+                        targets.add(mapping[candidate])
+                        break
+        if not targets:
+            return None, False
+        if len(targets) > 1:
+            return None, True
+        return next(iter(targets)), False
+
+    def _unique_raw_destination(target_dir: Path, stem: str) -> tuple[Path, Path]:
+        json_path = target_dir / f"{stem}.json"
+        md_path = target_dir / f"{stem}.md"
+        if not json_path.exists() and not md_path.exists():
+            return json_path, md_path
+        idx = 1
+        while True:
+            candidate_stem = f"{stem}-{idx}"
+            json_path = target_dir / f"{candidate_stem}.json"
+            md_path = target_dir / f"{candidate_stem}.md"
+            if not json_path.exists() and not md_path.exists():
+                return json_path, md_path
+            idx += 1
+
+    def _rewrite_raw_markdown_bucket(path: Path, bucket: str) -> None:
+        if not path.is_file():
+            return
+        lines = path.read_text(encoding="utf-8").splitlines()
+        updated = False
+        for idx, line in enumerate(lines):
+            if line.startswith("bucket: "):
+                lines[idx] = f"bucket: {bucket}"
+                updated = True
+                break
+        if not updated:
+            lines.insert(1, f"bucket: {bucket}")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def _remove_derived_outputs(dates: set[str], buckets: set[str]) -> list[str]:
+        removed: list[str] = []
+        for date_str in sorted(dates):
+            for bucket in sorted(buckets):
+                for suffix in ("md", "json"):
+                    path = data_root / "buckets" / bucket / "digests" / f"{date_str}.{suffix}"
+                    if path.is_file():
+                        path.unlink()
+                        removed.append(str(path.relative_to(data_root)))
+        return removed
 
     def _normalize_space_config(config_payload: dict) -> dict:
         normalized = dict(config_payload)
@@ -405,6 +541,9 @@ def create_app(settings: Settings) -> FastAPI:
                 },
             )
         return response
+
+    async def _run_ops_command_async(operation: str, args: list[str]) -> schemas.OpsResponse:
+        return await asyncio.to_thread(_run_ops_command, operation, args)
 
     def _error_response(code: str, message: str, status: int, headers: Optional[dict] = None) -> JSONResponse:
         return JSONResponse(
@@ -573,6 +712,10 @@ def create_app(settings: Settings) -> FastAPI:
     async def memory_latest():
         return storage.memory_latest()
 
+    @app.get("/memory/dates", dependencies=[read_auth_dependency], tags=["memory"])
+    async def memory_dates(limit: int = Query(180, ge=1, le=730)):
+        return storage.memory_dates(limit=limit)
+
     @app.get("/latest", dependencies=[read_auth_dependency], tags=["memory"], include_in_schema=False)
     async def memory_latest_alias():
         return storage.memory_latest()
@@ -588,6 +731,148 @@ def create_app(settings: Settings) -> FastAPI:
     @app.get("/state/projects", dependencies=[read_auth_dependency], tags=["state"])
     async def state_projects():
         return storage.state_projects()
+
+    @app.get("/state/signals", dependencies=[read_auth_dependency], tags=["state"])
+    async def state_signals(
+        anchor: Optional[str] = Query(None),
+        kind: Optional[str] = Query(None),
+        source: Optional[str] = Query(None),
+        objective_key: Optional[str] = Query(None),
+        throughline_key: Optional[str] = Query(None),
+        limit: int = Query(250, ge=1, le=5000),
+    ):
+        return storage.state_signals(
+            anchor=anchor,
+            kind=kind,
+            source=source,
+            objective_key=objective_key,
+            throughline_key=throughline_key,
+            limit=limit,
+        )
+
+    @app.get("/state/objectives", dependencies=[read_auth_dependency], tags=["state"])
+    async def state_objectives(
+        status: Optional[str] = Query(None),
+        source: Optional[str] = Query(None),
+        external_system: Optional[str] = Query(None, alias="externalSystem"),
+        objective_key: Optional[str] = Query(None),
+        limit: int = Query(250, ge=1, le=5000),
+    ):
+        return storage.state_objectives(
+            status=status,
+            source=source,
+            external_system=external_system,
+            objective_key=objective_key,
+            limit=limit,
+        )
+
+    @app.get("/state/throughlines", dependencies=[read_auth_dependency], tags=["state"])
+    async def state_throughlines(
+        status: Optional[str] = Query(None),
+        throughline_key: Optional[str] = Query(None),
+        limit: int = Query(250, ge=1, le=5000),
+    ):
+        return storage.state_throughlines(
+            status=status,
+            throughline_key=throughline_key,
+            limit=limit,
+        )
+
+    @app.patch(
+        "/state/throughlines/{throughline_key}",
+        response_model=schemas.StateThroughlineMutationResponse,
+        dependencies=[ops_auth_dependency],
+        tags=["state"],
+    )
+    async def state_throughline_patch(
+        request: Request,
+        throughline_key: str,
+        payload: schemas.StateThroughlinePatchRequest,
+    ):
+        before = storage.state_throughlines(throughline_key=throughline_key, limit=1)
+        try:
+            result = storage.patch_state_throughline(throughline_key, payload.model_dump(exclude_unset=True))
+        except StorageError as exc:
+            return _error_response(exc.code, exc.message, 400 if exc.code != "not_found" else 404)
+        after = storage.state_throughlines(throughline_key=result["throughline_key"], limit=1)
+        _append_audit_entry(
+            {
+                "ts": _now_iso(),
+                "action": "state.throughline.patch",
+                "actor": _audit_actor(request),
+                "reason": _audit_reason(request),
+                "status": "ok",
+                "changed_keys": _flatten_changed_keys(before, after),
+                "before": _redact_value(before),
+                "after": _redact_value(after),
+                "details": {"throughline_key": throughline_key, "result_key": result["throughline_key"]},
+            }
+        )
+        return schemas.StateThroughlineMutationResponse(**result)
+
+    @app.post(
+        "/state/throughlines/{throughline_key}/merge",
+        response_model=schemas.StateThroughlineMutationResponse,
+        dependencies=[ops_auth_dependency],
+        tags=["state"],
+    )
+    async def state_throughline_merge(
+        request: Request,
+        throughline_key: str,
+        payload: schemas.StateThroughlineMergeRequest,
+    ):
+        before = storage.state_throughlines(limit=5000)
+        try:
+            result = storage.merge_state_throughline(throughline_key, payload.model_dump(exclude_unset=True))
+        except StorageError as exc:
+            return _error_response(exc.code, exc.message, 400 if exc.code != "not_found" else 404)
+        after = storage.state_throughlines(limit=5000)
+        _append_audit_entry(
+            {
+                "ts": _now_iso(),
+                "action": "state.throughline.merge",
+                "actor": _audit_actor(request),
+                "reason": _audit_reason(request),
+                "status": "ok",
+                "changed_keys": _flatten_changed_keys(before, after),
+                "before": None,
+                "after": None,
+                "details": {
+                    "source_key": throughline_key,
+                    "target_key": result["throughline_key"],
+                    "changed_keys": _flatten_changed_keys(before, after),
+                },
+            }
+        )
+        return schemas.StateThroughlineMutationResponse(**result)
+
+    @app.delete(
+        "/state/throughlines/{throughline_key}",
+        response_model=schemas.StateThroughlineMutationResponse,
+        dependencies=[ops_auth_dependency],
+        tags=["state"],
+    )
+    async def state_throughline_delete(request: Request, throughline_key: str):
+        before = storage.state_throughlines(throughline_key=throughline_key, limit=1)
+        try:
+            result = storage.delete_state_throughline(throughline_key)
+        except StorageError as exc:
+            return _error_response(exc.code, exc.message, 400 if exc.code != "not_found" else 404)
+        after = storage.state_throughlines(throughline_key=throughline_key, limit=1)
+        _append_audit_entry(
+            {
+                "ts": _now_iso(),
+                "action": "state.throughline.delete",
+                "actor": _audit_actor(request),
+                "reason": _audit_reason(request),
+                "status": "ok",
+                "changed_keys": _flatten_changed_keys(before, after),
+                "before": _redact_value(before),
+                "after": _redact_value(after),
+                "details": {"throughline_key": throughline_key},
+            }
+        )
+        return schemas.StateThroughlineMutationResponse(**result)
 
     @app.put(
         "/state/projects/{project_key}",
@@ -670,7 +955,7 @@ def create_app(settings: Settings) -> FastAPI:
         tags=["system"],
     )
     async def config_space_update(request: Request, payload: schemas.SpaceConfigUpdateRequest):
-        current = _load_active_config().model_dump(mode="json")
+        current = _load_active_config_dict()
         return _write_space_config(payload.config, request=request, action="config.put", before_config=current)
 
     @app.patch(
@@ -1034,8 +1319,14 @@ def create_app(settings: Settings) -> FastAPI:
             payload["participants"] = [item.strip() for item in entry.participants if item and item.strip()]
         if entry.participant_count is not None:
             payload["participant_count"] = entry.participant_count
-        path = storage.write_memory_inbox_entry(payload)
-        return schemas.MemoryInboxResponse(path=path)
+        if entry.metadata:
+            payload["metadata"] = entry.metadata
+        stored = storage.write_memory_inbox_entry(payload)
+        return schemas.MemoryInboxResponse(
+            path=stored["path"],
+            artifact_id=stored["artifact_id"],
+            artifact_url=stored["artifact_url"],
+        )
 
     @app.post(
         "/ops/memory/run",
@@ -1066,7 +1357,7 @@ def create_app(settings: Settings) -> FastAPI:
             args.append("--force")
         if backfill_hours is not None:
             args.extend(["--backfill-hours", str(backfill_hours)])
-        _run_ops_command("memory.collect", args)
+        await _run_ops_command_async("memory.collect", args)
 
         last_result: schemas.OpsResponse | None = None
         for stage in ("digest", "memory", "seeds"):
@@ -1083,7 +1374,7 @@ def create_app(settings: Settings) -> FastAPI:
             ]
             if force:
                 stage_args.append("--force")
-            last_result = _run_ops_command(f"memory.{stage}", stage_args)
+            last_result = await _run_ops_command_async(f"memory.{stage}", stage_args)
 
         if last_result is not None:
             _append_audit_entry(
@@ -1106,6 +1397,109 @@ def create_app(settings: Settings) -> FastAPI:
                 }
             )
         return last_result
+
+    @app.post(
+        "/ops/state/run",
+        response_model=schemas.OpsResponse,
+        dependencies=[ops_auth_dependency],
+        tags=["ops"],
+    )
+    async def ops_state_run(
+        request: Request,
+        date: Optional[str] = Query(None, description="Optional YYYY-MM-DD target date for generated state"),
+        force: bool = Query(False),
+    ):
+        target_date = date
+        if target_date is None:
+            target_date = datetime.now(ZoneInfo(active_timezone)).date().isoformat()
+
+        args = [
+            "-m",
+            "community_memory.pipeline",
+            "state",
+            "--base",
+            ops_base_arg,
+            "--space",
+            settings.space,
+            "--date",
+            target_date,
+        ]
+        if force:
+            args.append("--force")
+        result = await _run_ops_command_async("state.run", args)
+        _append_audit_entry(
+            {
+                "ts": _now_iso(),
+                "action": "ops.state.run",
+                "actor": _audit_actor(request),
+                "reason": _audit_reason(request),
+                "status": "ok" if result.exit_code == 0 else "error",
+                "changed_keys": [],
+                "before": None,
+                "after": None,
+                "details": {
+                    "date": target_date,
+                    "force": force,
+                    "operation": result.operation,
+                    "exit_code": result.exit_code,
+                },
+            }
+        )
+        return result
+
+    @app.post(
+        "/ops/state/backfill",
+        response_model=schemas.OpsResponse,
+        dependencies=[ops_auth_dependency],
+        tags=["ops"],
+    )
+    async def ops_state_backfill(
+        request: Request,
+        days: int = Query(30, ge=1, le=180, description="Number of days of generated state to rebuild"),
+        force: bool = Query(True),
+    ):
+        local_today = datetime.now(ZoneInfo(active_timezone)).date()
+        start_date = local_today - timedelta(days=days - 1)
+        end_date = local_today
+        args = [
+            "-m",
+            "community_memory.pipeline",
+            "state",
+            "--base",
+            ops_base_arg,
+            "--space",
+            settings.space,
+            "--date",
+            end_date.isoformat(),
+            "--from-date",
+            start_date.isoformat(),
+            "--to-date",
+            end_date.isoformat(),
+        ]
+        if force:
+            args.append("--force")
+        result = await _run_ops_command_async("state.backfill", args)
+        _append_audit_entry(
+            {
+                "ts": _now_iso(),
+                "action": "ops.state.backfill",
+                "actor": _audit_actor(request),
+                "reason": _audit_reason(request),
+                "status": "ok" if result.exit_code == 0 else "error",
+                "changed_keys": [],
+                "before": None,
+                "after": None,
+                "details": {
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                    "days": days,
+                    "force": force,
+                    "operation": result.operation,
+                    "exit_code": result.exit_code,
+                },
+            }
+        )
+        return result
 
     @app.post(
         "/ops/memory/backfill",
@@ -1135,7 +1529,7 @@ def create_app(settings: Settings) -> FastAPI:
         ]
         if force:
             collect_args.append("--force")
-        collect_result = _run_ops_command("memory.collect", collect_args)
+        collect_result = await _run_ops_command_async("memory.collect", collect_args)
 
         results: list[schemas.OpsResponse] = []
         current = start_date
@@ -1155,7 +1549,7 @@ def create_app(settings: Settings) -> FastAPI:
                 ]
                 if force:
                     stage_args.append("--force")
-                results.append(_run_ops_command(f"memory.{stage}", stage_args))
+                results.append(await _run_ops_command_async(f"memory.{stage}", stage_args))
             current += timedelta(days=1)
 
         ok = collect_result.exit_code == 0 and all(result.exit_code == 0 for result in results)
@@ -1190,13 +1584,194 @@ def create_app(settings: Settings) -> FastAPI:
         )
 
     @app.post(
+        "/ops/memory/repair-discord-buckets",
+        response_model=schemas.DiscordBucketRepairResponse,
+        dependencies=[ops_auth_dependency],
+        tags=["ops"],
+    )
+    async def ops_memory_repair_discord_buckets(
+        request: Request,
+        payload: schemas.DiscordBucketRepairRequest,
+    ):
+        start_date = _parse_local_date(payload.from_date, field="from_date")
+        end_date = _parse_local_date(payload.to_date, field="to_date")
+        if end_date < start_date:
+            raise HTTPException(status_code=400, detail="to_date must be on or after from_date")
+
+        mapping = _discord_mapping_from_request(payload.category_to_bucket)
+        if not mapping:
+            raise HTTPException(status_code=400, detail="No Discord category_to_bucket mapping configured")
+
+        changes: list[dict] = []
+        warnings: list[str] = []
+        affected_dates: set[str] = set()
+        affected_buckets: set[str] = set()
+        reclassified_files = 0
+        unchanged_files = 0
+        unmapped_files = 0
+        split_required_files = 0
+        raw_paths = _raw_window_paths_for_dates(start_date, end_date)
+        scanned_files = len(raw_paths)
+
+        for raw_path in raw_paths:
+            try:
+                raw_payload = json.loads(raw_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                warnings.append(f"Skipped malformed raw window: {raw_path.relative_to(data_root)}")
+                continue
+            if not isinstance(raw_payload, dict):
+                warnings.append(f"Skipped non-object raw window: {raw_path.relative_to(data_root)}")
+                continue
+
+            try:
+                current_bucket = str(raw_payload.get("bucket") or raw_path.parts[-4]).strip()
+                target_bucket, split_required = _target_bucket_for_raw_window(raw_payload, mapping)
+                date_str = raw_path.parent.name
+                if split_required:
+                    split_required_files += 1
+                    changes.append(
+                        {
+                            "path": str(raw_path.relative_to(data_root)),
+                            "status": "split_required",
+                            "current_bucket": current_bucket,
+                        }
+                    )
+                    continue
+                if not target_bucket:
+                    unmapped_files += 1
+                    changes.append(
+                        {
+                            "path": str(raw_path.relative_to(data_root)),
+                            "status": "unmapped",
+                            "current_bucket": current_bucket,
+                        }
+                    )
+                    continue
+                if target_bucket == current_bucket and raw_payload.get("bucket") == target_bucket:
+                    unchanged_files += 1
+                    continue
+
+                affected_dates.add(date_str)
+                affected_buckets.update({current_bucket, target_bucket})
+                target_dir = data_root / "buckets" / target_bucket / "raw" / date_str
+                target_json = target_dir / raw_path.name
+                target_md = target_dir / f"{raw_path.stem}.md"
+                source_md = raw_path.with_suffix(".md")
+
+                change = {
+                    "path": str(raw_path.relative_to(data_root)),
+                    "status": "would_reclassify" if payload.dry_run else "reclassified",
+                    "from_bucket": current_bucket,
+                    "to_bucket": target_bucket,
+                    "date": date_str,
+                    "target_path": str(target_json.relative_to(data_root)),
+                }
+                changes.append(change)
+                reclassified_files += 1
+
+                if payload.dry_run:
+                    continue
+
+                target_dir.mkdir(parents=True, exist_ok=True)
+                if target_json.resolve() == raw_path.resolve():
+                    raw_payload["bucket"] = target_bucket
+                    raw_path.write_text(
+                        json.dumps(raw_payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                        encoding="utf-8",
+                    )
+                    _rewrite_raw_markdown_bucket(source_md, target_bucket)
+                    continue
+                if target_json.exists() or target_md.exists():
+                    target_json, target_md = _unique_raw_destination(target_dir, raw_path.stem)
+                    change["target_path"] = str(target_json.relative_to(data_root))
+                raw_payload["bucket"] = target_bucket
+                raw_path.write_text(
+                    json.dumps(raw_payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+                shutil.move(str(raw_path), str(target_json))
+                if source_md.is_file():
+                    _rewrite_raw_markdown_bucket(source_md, target_bucket)
+                    shutil.move(str(source_md), str(target_md))
+            except Exception as exc:
+                warnings.append(
+                    f"Skipped raw window after unexpected repair error: {raw_path.relative_to(data_root)} ({exc})"
+                )
+                continue
+
+        rebuild_results: list[schemas.OpsResponse] = []
+        if not payload.dry_run and payload.rebuild and affected_dates:
+            removed = _remove_derived_outputs(affected_dates, affected_buckets)
+            if removed:
+                warnings.append(f"Removed {len(removed)} stale digest file(s) before rebuild")
+            for date_str in sorted(affected_dates):
+                for stage in ("digest", "memory", "seeds"):
+                    stage_args = [
+                        "-m",
+                        "community_memory.pipeline",
+                        stage,
+                        "--base",
+                        ops_base_arg,
+                        "--space",
+                        settings.space,
+                        "--date",
+                        date_str,
+                        "--force",
+                    ]
+                    rebuild_results.append(await _run_ops_command_async(f"memory.{stage}", stage_args))
+
+        ok = not rebuild_results or all(result.exit_code == 0 for result in rebuild_results)
+        _append_audit_entry(
+            {
+                "ts": _now_iso(),
+                "action": "ops.memory.repair_discord_buckets",
+                "actor": _audit_actor(request),
+                "reason": _audit_reason(request),
+                "status": "dry_run" if payload.dry_run else ("ok" if ok else "error"),
+                "changed_keys": [],
+                "before": None,
+                "after": None,
+                "details": {
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                    "dry_run": payload.dry_run,
+                    "rebuild": payload.rebuild,
+                    "scanned_files": scanned_files,
+                    "reclassified_files": reclassified_files,
+                    "unchanged_files": unchanged_files,
+                    "unmapped_files": unmapped_files,
+                    "split_required_files": split_required_files,
+                    "affected_dates": sorted(affected_dates),
+                    "affected_buckets": sorted(affected_buckets),
+                },
+            }
+        )
+
+        return schemas.DiscordBucketRepairResponse(
+            ok=ok,
+            dry_run=payload.dry_run,
+            start_date=start_date.isoformat(),
+            end_date=end_date.isoformat(),
+            scanned_files=scanned_files,
+            reclassified_files=reclassified_files,
+            unchanged_files=unchanged_files,
+            unmapped_files=unmapped_files,
+            split_required_files=split_required_files,
+            affected_dates=sorted(affected_dates),
+            affected_buckets=sorted(affected_buckets),
+            changes=changes,
+            warnings=warnings,
+            rebuild_results=rebuild_results,
+        )
+
+    @app.post(
         "/ops/knowledge/promote",
         response_model=schemas.OpsResponse,
         dependencies=[ops_auth_dependency],
         tags=["ops"],
     )
     async def ops_knowledge_promote():
-        return _run_ops_command(
+        return await _run_ops_command_async(
             "knowledge.promote",
             [
                 "-m",
@@ -1216,7 +1791,7 @@ def create_app(settings: Settings) -> FastAPI:
         tags=["ops"],
     )
     async def ops_knowledge_validate():
-        return _run_ops_command(
+        return await _run_ops_command_async(
             "knowledge.validate",
             [
                 "-m",
@@ -1236,7 +1811,7 @@ def create_app(settings: Settings) -> FastAPI:
         tags=["ops"],
     )
     async def ops_knowledge_index():
-        return _run_ops_command(
+        return await _run_ops_command_async(
             "knowledge.index",
             [
                 "-m",
@@ -1256,7 +1831,7 @@ def create_app(settings: Settings) -> FastAPI:
         tags=["ops"],
     )
     async def ops_knowledge_run(request: Request):
-        promote_result = _run_ops_command(
+        promote_result = await _run_ops_command_async(
             "knowledge.promote",
             [
                 "-m",
@@ -1268,7 +1843,7 @@ def create_app(settings: Settings) -> FastAPI:
                 settings.space,
             ],
         )
-        validate_result = _run_ops_command(
+        validate_result = await _run_ops_command_async(
             "knowledge.validate",
             [
                 "-m",
@@ -1280,7 +1855,7 @@ def create_app(settings: Settings) -> FastAPI:
                 settings.space,
             ],
         )
-        index_result = _run_ops_command(
+        index_result = await _run_ops_command_async(
             "knowledge.index",
             [
                 "-m",

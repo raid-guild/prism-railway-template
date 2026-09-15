@@ -32,6 +32,7 @@ export async function POST(request: Request) {
       enabled: parseBoolean(body?.enabled),
       workflowKey,
       authMode: parseString(body?.authMode ?? body?.auth_mode) || "service-token",
+      authConfig: parseConfig(body?.authConfig ?? body?.auth_config),
       requestTemplate: parseConfig(body?.requestTemplate ?? body?.request_template),
       autoRun: parseConfig(body?.autoRun ?? body?.auto_run),
     })

@@ -8,7 +8,8 @@ import {
   getTargetEnvironment,
   getWorkflowByKey,
   getWorkflowRunForRequest,
-  listChangeRequestExecutions,
+  listAgentRuns,
+  listActiveAgentRunsForRequest,
   listRequestExternalRefs,
   updateChangeRequest,
   updateWorkflowRun,
@@ -16,6 +17,7 @@ import {
 
 import { parseNullableString, requireServiceAccess } from "@/lib/internal-service"
 import { readRouteParam, trackedChangeRequestPriorities } from "@/lib/local-admin-api"
+import { parseEstimatedHumanHours } from "@/lib/request-estimates"
 
 type RouteContext = {
   params: Promise<{ id: string }>
@@ -39,13 +41,14 @@ export async function GET(_request: Request, context: RouteContext) {
 
   const targetApp = changeRequest.targetAppId ? getTargetApp(changeRequest.targetAppId) : null
   const targetEnvironment = changeRequest.targetEnvironmentId ? getTargetEnvironment(changeRequest.targetEnvironmentId) : null
-  const latestExecution = listChangeRequestExecutions(changeRequest.id)[0] ?? null
+  const agentRuns = listAgentRuns({ requestId: changeRequest.id, limit: 50 })
+  const latestAgentRun = agentRuns[0] ?? null
   const externalRefs = listRequestExternalRefs(changeRequest.id)
   const deployPlan = targetApp && targetEnvironment
     ? buildTargetEnvironmentDeployPlan({ request: changeRequest, targetApp, targetEnvironment })
     : null
 
-  return NextResponse.json({ ok: true, changeRequest, targetApp, targetEnvironment, deployPlan, latestExecution, externalRefs })
+  return NextResponse.json({ ok: true, changeRequest, targetApp, targetEnvironment, deployPlan, latestAgentRun, latestExecution: null, agentRuns, externalRefs })
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
@@ -69,6 +72,8 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
   const body = payload as Record<string, unknown>
   const nextPriority = typeof body.priority === "string" ? body.priority : undefined
+  const hasEstimatedHumanHours = body.estimatedHumanHours !== undefined || body.estimated_human_hours !== undefined
+  const estimatedHumanHours = parseEstimatedHumanHours(body.estimatedHumanHours ?? body.estimated_human_hours)
   const rawWorkflowStepKey = body.currentWorkflowStepKey ?? body.current_workflow_step_key
   const nextWorkflowStepKey =
     typeof rawWorkflowStepKey === "string"
@@ -90,9 +95,19 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (nextPriority && !trackedChangeRequestPriorities.includes(nextPriority as typeof trackedChangeRequestPriorities[number])) {
     return NextResponse.json({ ok: false, error: "Invalid priority" }, { status: 400 })
   }
+  if (hasEstimatedHumanHours && estimatedHumanHours === undefined) {
+    return NextResponse.json({ ok: false, error: "Invalid estimatedHumanHours" }, { status: 400 })
+  }
   if (nextWorkflowStepKey) {
     if (!nextWorkflowStep) {
       return NextResponse.json({ ok: false, error: "Invalid workflow step" }, { status: 400 })
+    }
+    const activeAgentRuns = listActiveAgentRunsForRequest(changeRequestId)
+    if (activeAgentRuns.length) {
+      return NextResponse.json(
+        { ok: false, error: "AGENT_RUN_ACTIVE", activeAgentRuns },
+        { status: 409 },
+      )
     }
   }
 
@@ -107,6 +122,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       body.triageSummary !== undefined || body.triage_summary !== undefined
         ? parseNullableString(body.triageSummary ?? body.triage_summary) ?? null
         : undefined,
+    estimatedHumanHours: hasEstimatedHumanHours ? estimatedHumanHours ?? null : undefined,
     reviewNotes:
       body.reviewNotes !== undefined || body.review_notes !== undefined
         ? parseNullableString(body.reviewNotes ?? body.review_notes) ?? null

@@ -61,6 +61,9 @@ Optional:
 - `url`
 - `participants`
 - `participant_count`
+- `metadata`
+
+Use `metadata` for source-agnostic state hints such as `source_system`, `source_type`, `source_id`, `source_version`, `objective_keys`, `throughline_keys`, and `external_refs`.
 
 Use memory inbox for:
 

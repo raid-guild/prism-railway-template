@@ -1,0 +1,4 @@
+interface:
+  display_name: "Buzz Channel Admin"
+  short_description: "Create and manage Buzz channels safely"
+  default_prompt: "Use $prism-buzz-channel-admin to create or manage a Buzz channel."

@@ -47,6 +47,46 @@ class FilesystemStorageBackend:
     def memory_latest(self) -> Any:
         return self._load_json(self.root / "memory" / "rolling" / "latest.json")
 
+    def memory_dates(self, limit: int = 180) -> Dict[str, Any]:
+        rolling_root = self.root / "memory" / "rolling"
+        candidates = sorted(
+            (
+                path
+                for path in rolling_root.glob("????-??-??.json")
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}\.json", path.name)
+            ),
+            reverse=True,
+        )
+        items: List[Dict[str, Any]] = []
+        for path in candidates[:limit]:
+            try:
+                payload = self._load_json(path)
+            except StorageError:
+                continue
+            sections = payload.get("sections") if isinstance(payload, dict) else {}
+            sections = sections if isinstance(sections, dict) else {}
+            buckets = {
+                str(entry.get("bucket")).strip()
+                for entries in sections.values()
+                if isinstance(entries, list)
+                for entry in entries
+                if isinstance(entry, dict) and str(entry.get("bucket") or "").strip()
+            }
+            source_paths = payload.get("source_digest_paths") if isinstance(payload, dict) else []
+            for source_path in source_paths if isinstance(source_paths, list) else []:
+                match = re.match(r"^buckets/([^/]+)/", str(source_path))
+                if match:
+                    buckets.add(match.group(1))
+            items.append(
+                {
+                    "date": path.stem,
+                    "section_count": sum(1 for entries in sections.values() if isinstance(entries, list) and entries),
+                    "entry_count": sum(len(entries) for entries in sections.values() if isinstance(entries, list)),
+                    "bucket_count": len(buckets),
+                }
+            )
+        return {"dates": items, "total": len(candidates), "limit": limit}
+
     def memory_by_date(self, date_str: str) -> Any:
         self._validate_date(date_str)
         return self._load_json(self.root / "memory" / "rolling" / f"{date_str}.json")
@@ -56,6 +96,109 @@ class FilesystemStorageBackend:
 
     def state_projects(self) -> Any:
         return self._load_json(self.root / "state" / "current" / "projects.json")
+
+    def state_signals(
+        self,
+        anchor: Optional[str] = None,
+        kind: Optional[str] = None,
+        source: Optional[str] = None,
+        objective_key: Optional[str] = None,
+        throughline_key: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> Any:
+        payload = self._load_json(self.root / "state" / "current" / "signals.json")
+        signals = [item for item in payload.get("signals", []) if isinstance(item, dict)]
+        objective_signal_ids: set[str] = set()
+        if objective_key:
+            try:
+                objectives_payload = self._load_json(self.root / "state" / "current" / "objectives.json")
+            except StorageError:
+                objectives_payload = {}
+            objectives = objectives_payload.get("objectives", []) if isinstance(objectives_payload, dict) else []
+            for objective in objectives:
+                if not isinstance(objective, dict):
+                    continue
+                if str(objective.get("objective_key") or "") != objective_key:
+                    continue
+                objective_signal_ids = {
+                    str(signal_id)
+                    for signal_id in objective.get("signal_ids", [])
+                    if str(signal_id).strip()
+                }
+                break
+        if anchor:
+            signals = [item for item in signals if str(item.get("anchor") or "") == anchor]
+        if kind:
+            signals = [item for item in signals if str(item.get("kind") or "") == kind]
+        if source:
+            signals = [item for item in signals if str(item.get("source") or "") == source]
+        if objective_key:
+            signals = [
+                item for item in signals
+                if str(item.get("objective_key") or "") == objective_key
+                or str(item.get("signal_id") or "") in objective_signal_ids
+            ]
+        if throughline_key:
+            signals = [item for item in signals if str(item.get("throughline_key") or "") == throughline_key]
+        if limit is not None:
+            signals = signals[-limit:]
+        result = dict(payload)
+        result["signals"] = signals
+        result["total"] = len(signals)
+        return result
+
+    def state_objectives(
+        self,
+        status: Optional[str] = None,
+        source: Optional[str] = None,
+        external_system: Optional[str] = None,
+        objective_key: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> Any:
+        payload = self._load_json(self.root / "state" / "current" / "objectives.json")
+        objectives = [item for item in payload.get("objectives", []) if isinstance(item, dict)]
+        if status:
+            objectives = [item for item in objectives if str(item.get("status") or "") == status]
+        if source:
+            objectives = [
+                item for item in objectives
+                if source in [str(value) for value in item.get("sources", [])]
+            ]
+        if external_system:
+            objectives = [
+                item for item in objectives
+                if any(
+                    isinstance(ref, dict) and str(ref.get("system") or "") == external_system
+                    for ref in item.get("external_refs", [])
+                )
+            ]
+        if objective_key:
+            objectives = [item for item in objectives if str(item.get("objective_key") or "") == objective_key]
+        if limit is not None:
+            objectives = objectives[:limit]
+        result = dict(payload)
+        result["objectives"] = objectives
+        result["total"] = len(objectives)
+        return result
+
+    def state_throughlines(
+        self,
+        status: Optional[str] = None,
+        throughline_key: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> Any:
+        payload = self._load_json(self.root / "state" / "current" / "throughlines.json")
+        throughlines = [item for item in payload.get("throughlines", []) if isinstance(item, dict)]
+        if status:
+            throughlines = [item for item in throughlines if str(item.get("status") or "") == status]
+        if throughline_key:
+            throughlines = [item for item in throughlines if str(item.get("throughline_key") or "") == throughline_key]
+        if limit is not None:
+            throughlines = throughlines[:limit]
+        result = dict(payload)
+        result["throughlines"] = throughlines
+        result["total"] = len(throughlines)
+        return result
 
     def upsert_state_project(self, project_key: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         normalized_key = self._safe_slug(project_key)
@@ -173,6 +316,154 @@ class FilesystemStorageBackend:
             "updated_at": generated_at,
             "project": project,
         }
+
+    def patch_state_throughline(self, throughline_key: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        source_key = self._safe_state_key(throughline_key)
+        if not source_key:
+            raise StorageError("invalid_throughline_key", "throughline_key is required")
+
+        target_key = self._safe_state_key(str(payload.get("throughline_key") or source_key))
+        if not target_key:
+            raise StorageError("invalid_throughline_key", "throughline_key is required")
+
+        current_payload = self._load_throughlines_current()
+        curation_payload = self._load_throughline_curation()
+        throughlines = [
+            item for item in current_payload.get("throughlines", [])
+            if isinstance(item, dict)
+        ]
+        throughline = self._find_throughline(throughlines, source_key)
+        if throughline is None:
+            throughline = self._blank_throughline(source_key)
+            throughlines.append(throughline)
+
+        if target_key != source_key:
+            existing_target = self._find_throughline(throughlines, target_key)
+            if existing_target is not None:
+                throughline = self._merge_throughline_items(existing_target, throughline)
+                throughlines = [
+                    item for item in throughlines
+                    if self._safe_state_key(str(item.get("throughline_key", ""))) != source_key
+                ]
+            else:
+                throughline["throughline_key"] = target_key
+            self._record_throughline_merge(curation_payload, source_key, target_key)
+            curation_payload.setdefault("throughlines", {}).pop(source_key, None)
+
+        self._apply_throughline_patch(throughline, payload)
+        curation_entry = self._curation_entry_from_patch(target_key, payload)
+        throughline_overrides = curation_payload.setdefault("throughlines", {})
+        existing_curation = throughline_overrides.get(target_key)
+        if not isinstance(existing_curation, dict):
+            existing_curation = {}
+        existing_curation.update(curation_entry)
+        throughline_overrides[target_key] = existing_curation
+
+        if bool(existing_curation.get("hidden")):
+            throughlines = [
+                item for item in throughlines
+                if self._safe_state_key(str(item.get("throughline_key", ""))) != target_key
+            ]
+            throughline = None
+
+        return self._write_throughline_state(
+            current_payload=current_payload,
+            curation_payload=curation_payload,
+            throughlines=throughlines,
+            throughline_key=target_key,
+            throughline=throughline,
+        )
+
+    def merge_state_throughline(self, throughline_key: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        source_key = self._safe_state_key(throughline_key)
+        target_key = self._safe_state_key(str(payload.get("target_key") or ""))
+        if not source_key or not target_key:
+            raise StorageError("invalid_throughline_key", "source and target throughline keys are required")
+        if source_key == target_key:
+            raise StorageError("invalid_throughline_merge", "source and target throughline keys must differ")
+
+        current_payload = self._load_throughlines_current()
+        curation_payload = self._load_throughline_curation()
+        throughlines = [
+            item for item in current_payload.get("throughlines", [])
+            if isinstance(item, dict)
+        ]
+        source = self._find_throughline(throughlines, source_key)
+        target = self._find_throughline(throughlines, target_key)
+        if source is None:
+            source = self._blank_throughline(source_key)
+        if target is None:
+            target = self._blank_throughline(target_key)
+            throughlines.append(target)
+
+        target = self._merge_throughline_items(target, source)
+        merge_patch = {
+            "title": payload.get("title"),
+            "summary": payload.get("summary"),
+            "aliases": payload.get("aliases"),
+        }
+        self._apply_throughline_patch(target, merge_patch)
+        throughlines = [
+            item for item in throughlines
+            if self._safe_state_key(str(item.get("throughline_key", ""))) != source_key
+        ]
+
+        self._record_throughline_merge(curation_payload, source_key, target_key)
+        overrides = curation_payload.setdefault("throughlines", {})
+        source_override = overrides.get(source_key)
+        if not isinstance(source_override, dict):
+            source_override = {}
+        source_override.update({"hidden": True, "merge_into": target_key})
+        if payload.get("reason"):
+            source_override["notes"] = str(payload.get("reason") or "").strip()
+        overrides[source_key] = source_override
+
+        target_override = overrides.get(target_key)
+        if not isinstance(target_override, dict):
+            target_override = {}
+        target_override.update(self._curation_entry_from_patch(target_key, merge_patch))
+        target_aliases = self._coerce_str_list(target_override.get("aliases", []))
+        for alias in [source_key, str(source.get("title") or "")]:
+            alias = alias.strip()
+            if alias and alias not in target_aliases:
+                target_aliases.append(alias)
+        target_override["aliases"] = target_aliases
+        overrides[target_key] = target_override
+
+        return self._write_throughline_state(
+            current_payload=current_payload,
+            curation_payload=curation_payload,
+            throughlines=throughlines,
+            throughline_key=target_key,
+            throughline=target,
+        )
+
+    def delete_state_throughline(self, throughline_key: str) -> Dict[str, Any]:
+        normalized_key = self._safe_state_key(throughline_key)
+        if not normalized_key:
+            raise StorageError("invalid_throughline_key", "throughline_key is required")
+
+        current_payload = self._load_throughlines_current()
+        curation_payload = self._load_throughline_curation()
+        throughlines = [
+            item for item in current_payload.get("throughlines", [])
+            if isinstance(item, dict)
+            and self._safe_state_key(str(item.get("throughline_key", ""))) != normalized_key
+        ]
+        overrides = curation_payload.setdefault("throughlines", {})
+        existing = overrides.get(normalized_key)
+        if not isinstance(existing, dict):
+            existing = {}
+        existing.update({"hidden": True, "archived": True, "status": "archived"})
+        overrides[normalized_key] = existing
+
+        return self._write_throughline_state(
+            current_payload=current_payload,
+            curation_payload=curation_payload,
+            throughlines=throughlines,
+            throughline_key=normalized_key,
+            throughline=None,
+        )
 
     def digests_by_date(self, date_str: str) -> Dict[str, Any]:
         self._validate_date(date_str)
@@ -574,6 +865,254 @@ class FilesystemStorageBackend:
         path = self.root / "products" / "suggestions" / f"weekly-{week_key}.json"
         return self._load_json(path)
 
+    def _load_throughlines_current(self) -> Dict[str, Any]:
+        path = self.root / "state" / "current" / "throughlines.json"
+        if path.is_file():
+            loaded = self._load_json(path)
+            if isinstance(loaded, dict):
+                loaded.setdefault("throughlines", [])
+                return loaded
+        return {"generated_at": None, "as_of_date": None, "throughlines": []}
+
+    def _load_throughline_curation(self) -> Dict[str, Any]:
+        path = self.root / "state" / "curation" / "throughlines.json"
+        if path.is_file():
+            loaded = self._load_json(path)
+            if isinstance(loaded, dict):
+                loaded.setdefault("throughlines", {})
+                loaded.setdefault("merges", {})
+                return loaded
+        return {"updated_at": None, "throughlines": {}, "merges": {}}
+
+    def _write_throughline_state(
+        self,
+        *,
+        current_payload: Dict[str, Any],
+        curation_payload: Dict[str, Any],
+        throughlines: List[Dict[str, Any]],
+        throughline_key: str,
+        throughline: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        generated_at = self._to_iso(datetime.now(timezone.utc))
+        current_path = self.root / "state" / "current" / "throughlines.json"
+        curation_path = self.root / "state" / "curation" / "throughlines.json"
+        latest_path = self.root / "state" / "latest.json"
+
+        throughlines = self._sort_throughlines(throughlines)
+        current_payload.update(
+            {
+                "generated_at": generated_at,
+                "as_of_date": current_payload.get("as_of_date") or datetime.now(timezone.utc).date().isoformat(),
+                "throughlines": throughlines,
+            }
+        )
+        curation_payload["updated_at"] = generated_at
+
+        current_path.parent.mkdir(parents=True, exist_ok=True)
+        with current_path.open("w", encoding="utf-8") as handle:
+            json.dump(current_payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
+
+        curation_path.parent.mkdir(parents=True, exist_ok=True)
+        with curation_path.open("w", encoding="utf-8") as handle:
+            json.dump(curation_payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
+
+        latest_payload: Dict[str, Any] = {}
+        if latest_path.is_file():
+            loaded = self._load_json(latest_path)
+            if isinstance(loaded, dict):
+                latest_payload = loaded
+        domains = latest_payload.get("domains") if isinstance(latest_payload.get("domains"), dict) else {}
+        counts = {"active": 0, "watching": 0, "inactive": 0, "archived": 0}
+        for item in throughlines:
+            status = str(item.get("status") or "inactive")
+            if status not in counts:
+                status = "inactive"
+            counts[status] += 1
+        domains["throughlines"] = {
+            "source_path": "state/current/throughlines.json",
+            "updated_at": generated_at,
+            "summary": (
+                f"{counts['active']} active, {counts['watching']} watching, "
+                f"{counts['inactive']} inactive, {counts['archived']} archived."
+            ),
+        }
+        recent_changes = [
+            item for item in latest_payload.get("recent_changes", []) if isinstance(item, dict)
+        ] if isinstance(latest_payload.get("recent_changes"), list) else []
+        recent_changes.insert(
+            0,
+            {
+                "domain": "throughlines",
+                "change_type": "curated",
+                "summary": f"Throughline '{throughline_key}' curated.",
+                "updated_at": generated_at,
+                "source_path": "state/current/throughlines.json",
+            },
+        )
+        latest_payload.update(
+            {
+                "generated_at": generated_at,
+                "domains": domains,
+                "recent_changes": recent_changes[:20],
+            }
+        )
+        latest_path.parent.mkdir(parents=True, exist_ok=True)
+        with latest_path.open("w", encoding="utf-8") as handle:
+            json.dump(latest_payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
+
+        return {
+            "path": str(current_path.relative_to(self.root)),
+            "curation_path": str(curation_path.relative_to(self.root)),
+            "latest_path": str(latest_path.relative_to(self.root)),
+            "throughline_key": throughline_key,
+            "updated_at": generated_at,
+            "throughline": throughline,
+            "curation": curation_payload,
+        }
+
+    def _apply_throughline_patch(self, throughline: Dict[str, Any], payload: Dict[str, Any]) -> None:
+        for field in ("title", "summary", "kind", "notes"):
+            if field in payload and payload[field] is not None:
+                throughline[field] = str(payload[field]).strip()
+        if "status" in payload and payload["status"] is not None:
+            status = str(payload["status"]).strip().lower()
+            if status not in {"active", "watching", "inactive", "archived"}:
+                raise StorageError("invalid_status", "status must be active, watching, inactive, or archived")
+            throughline["status"] = status
+        if "aliases" in payload and payload["aliases"] is not None:
+            throughline["aliases"] = self._coerce_str_list(payload["aliases"])
+        if "tags" in payload and payload["tags"] is not None:
+            throughline["tags"] = self._coerce_str_list(payload["tags"])
+        if "owners" in payload and payload["owners"] is not None:
+            throughline["owners"] = self._coerce_str_list(payload["owners"])
+        if "objective_keys" in payload and payload["objective_keys"] is not None:
+            throughline["objective_keys"] = self._coerce_str_list(payload["objective_keys"])
+        if "external_refs" in payload and payload["external_refs"] is not None:
+            throughline["external_refs"] = [
+                item for item in payload["external_refs"] if isinstance(item, dict)
+            ]
+        if "pinned" in payload and payload["pinned"] is not None:
+            throughline["pinned"] = bool(payload["pinned"])
+        if "archived" in payload and payload["archived"] is not None:
+            throughline["archived"] = bool(payload["archived"])
+            if bool(payload["archived"]):
+                throughline["status"] = "archived"
+        throughline["curation_applied"] = True
+
+    def _curation_entry_from_patch(self, throughline_key: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        entry: Dict[str, Any] = {"throughline_key": throughline_key}
+        for field in (
+            "title",
+            "summary",
+            "status",
+            "kind",
+            "aliases",
+            "tags",
+            "owners",
+            "objective_keys",
+            "external_refs",
+            "pinned",
+            "archived",
+            "hidden",
+            "notes",
+        ):
+            if field in payload and payload[field] is not None:
+                if field in {"aliases", "tags", "owners", "objective_keys"}:
+                    entry[field] = self._coerce_str_list(payload[field])
+                else:
+                    entry[field] = payload[field]
+        return entry
+
+    def _record_throughline_merge(self, curation_payload: Dict[str, Any], source_key: str, target_key: str) -> None:
+        merges = curation_payload.setdefault("merges", {})
+        merges[source_key] = target_key
+
+    def _find_throughline(self, throughlines: List[Dict[str, Any]], throughline_key: str) -> Optional[Dict[str, Any]]:
+        for item in throughlines:
+            if self._safe_state_key(str(item.get("throughline_key", ""))) == throughline_key:
+                return item
+        return None
+
+    def _blank_throughline(self, throughline_key: str) -> Dict[str, Any]:
+        return {
+            "throughline_key": throughline_key,
+            "title": throughline_key.replace("-", " ").title(),
+            "summary": "",
+            "status": "inactive",
+            "objective_keys": [],
+            "signal_ids": [],
+            "last_signal_at": None,
+            "enrichment_status": "manual",
+            "activity_score": 0.0,
+            "attention_score": 0.0,
+            "score_reasons": ["manual curation"],
+            "curation_applied": True,
+        }
+
+    def _merge_throughline_items(self, target: Dict[str, Any], source: Dict[str, Any]) -> Dict[str, Any]:
+        target["throughline_key"] = self._safe_state_key(str(target.get("throughline_key") or ""))
+        if not target.get("title"):
+            target["title"] = source.get("title") or target["throughline_key"].replace("-", " ").title()
+        if not target.get("summary") and source.get("summary"):
+            target["summary"] = source.get("summary")
+        for field in ("objective_keys", "signal_ids", "aliases", "tags", "owners"):
+            merged = self._coerce_str_list(target.get(field, []))
+            for item in self._coerce_str_list(source.get(field, [])):
+                if item not in merged:
+                    merged.append(item)
+            if merged:
+                target[field] = merged
+        target["last_signal_at"] = self._max_iso(target.get("last_signal_at"), source.get("last_signal_at"))
+        target["activity_score"] = max(float(target.get("activity_score") or 0.0), float(source.get("activity_score") or 0.0))
+        target["attention_score"] = max(float(target.get("attention_score") or 0.0), float(source.get("attention_score") or 0.0))
+        source_key = str(source.get("throughline_key") or "").strip()
+        if source_key:
+            aliases = self._coerce_str_list(target.get("aliases", []))
+            if source_key not in aliases:
+                aliases.append(source_key)
+            target["aliases"] = aliases
+        target["curation_applied"] = True
+        return target
+
+    def _sort_throughlines(self, throughlines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        status_rank = {"active": 3, "watching": 2, "inactive": 1, "archived": 0}
+        return sorted(
+            throughlines,
+            key=lambda item: (
+                bool(item.get("pinned")),
+                status_rank.get(str(item.get("status") or "inactive"), 0),
+                float(item.get("activity_score") or 0.0),
+                float(item.get("attention_score") or 0.0),
+                str(item.get("last_signal_at") or ""),
+                str(item.get("throughline_key") or ""),
+            ),
+            reverse=True,
+        )
+
+    @staticmethod
+    def _max_iso(first: Any, second: Any) -> Any:
+        def parse(value: Any) -> Optional[datetime]:
+            text = str(value or "").strip()
+            if not text:
+                return None
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            try:
+                return datetime.fromisoformat(text).astimezone(timezone.utc)
+            except ValueError:
+                return None
+
+        first_dt = parse(first)
+        second_dt = parse(second)
+        if first_dt is None:
+            return second
+        if second_dt is None:
+            return first
+        return first if first_dt >= second_dt else second
+
     def _artifact_summary_from_path(self, path: Path, status: str) -> Dict[str, Any]:
         if path.suffix.lower() == ".json":
             payload = self._load_json(path)
@@ -903,7 +1442,7 @@ class FilesystemStorageBackend:
             "meta_path": str(meta_path.relative_to(self.root)),
         }
 
-    def write_memory_inbox_entry(self, payload: Dict[str, Any]) -> str:
+    def write_memory_inbox_entry(self, payload: Dict[str, Any]) -> Dict[str, str]:
         required = ["source", "ts", "type", "content"]
         missing = [field for field in required if not str(payload.get(field, "")).strip()]
         if missing:
@@ -925,15 +1464,27 @@ class FilesystemStorageBackend:
         ts_value = str(payload["ts"]).strip()
         filename = f"{ts_value.replace(':', '').replace('-', '').replace('T', '_')}-{slug}-{uuid.uuid4().hex[:8]}.json"
         path = self.memory_inbox / filename
+        artifact_id = path.stem
+        artifact_url = f"/artifacts/{artifact_id}"
+        if not str(payload.get("url") or "").strip():
+            payload["url"] = artifact_url
         with path.open("w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
             handle.write("\n")
-        return str(path.relative_to(self.root))
+        return {
+            "path": str(path.relative_to(self.root)),
+            "artifact_id": artifact_id,
+            "artifact_url": artifact_url,
+        }
 
     @staticmethod
     def _safe_slug(value: str) -> str:
         slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", value).strip("-").lower()
         return slug or "inbox"
+
+    @staticmethod
+    def _safe_state_key(value: str) -> str:
+        return re.sub(r"[^a-zA-Z0-9._-]+", "-", value).strip("-").lower()
 
     def _resolve_manifest_entry(self, slug: str) -> Tuple[str, Dict[str, Any]]:
         normalized = self._normalize_slug(slug)

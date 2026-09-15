@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
 from .activity import ActivityLogger
 from .config_loader import AgenticIngestConfig, SpaceConfig
+from .provider_client import call_json_provider
 
 
 SYSTEM_PROMPT = """You classify Prism Memory inbox records for downstream synthesis.
@@ -100,10 +98,6 @@ class AgenticIngestEnricher:
     def _classify(self, record: Dict[str, Any]) -> Dict[str, Any]:
         settings = self.config.agentic_ingest
         provider = settings.provider
-        base = provider.base_url.rstrip("/")
-        if not base.endswith("/v1"):
-            base = f"{base}/v1"
-        url = f"{base}/chat/completions"
         metadata = record.get("metadata") or {}
         user_payload = {
             "source": record.get("source"),
@@ -116,41 +110,17 @@ class AgenticIngestEnricher:
             "content": record.get("content"),
         }
         policy_prompt = self._policy_prompt()
-        body = {
-            "model": provider.model,
-            "temperature": 0,
-            "response_format": {"type": "json_object"},
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        SYSTEM_PROMPT
-                        if not policy_prompt
-                        else f"{SYSTEM_PROMPT}\n\nCommunity policy:\n{policy_prompt}"
-                    ),
-                },
-                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=True)},
-            ],
-        }
-        headers = {"Content-Type": "application/json"}
-        if provider.api_key:
-            headers["Authorization"] = f"Bearer {provider.api_key}"
-        request = Request(
-            url,
-            method="POST",
-            headers=headers,
-            data=json.dumps(body, ensure_ascii=True).encode("utf-8"),
+        parsed = call_json_provider(
+            provider,
+            system_prompt=(
+                SYSTEM_PROMPT
+                if not policy_prompt
+                else f"{SYSTEM_PROMPT}\n\nCommunity policy:\n{policy_prompt}"
+            ),
+            user_payload=user_payload,
+            session_id=f"agentic-ingest-{record.get('source_file', 'unknown')}",
+            purpose="prism_memory_agentic_ingest",
         )
-        try:
-            with urlopen(request, timeout=provider.timeout_seconds) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:  # pragma: no cover - runtime path
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"provider_http_error:{exc.code}:{detail}") from exc
-        except URLError as exc:  # pragma: no cover - runtime path
-            raise RuntimeError(f"provider_unreachable:{exc.reason}") from exc
-        content = self._extract_message_content(payload)
-        parsed = json.loads(content)
         return self._normalize_result(parsed)
 
     def _policy_prompt(self) -> str:
@@ -181,28 +151,6 @@ class AgenticIngestEnricher:
         if policy.custom_guidance:
             parts.append("Custom guidance: " + policy.custom_guidance)
         return "\n".join(parts)
-
-    @staticmethod
-    def _extract_message_content(payload: Dict[str, Any]) -> str:
-        choices = payload.get("choices")
-        if not isinstance(choices, list) or not choices:
-            raise RuntimeError("provider_missing_choices")
-        message = choices[0].get("message")
-        if not isinstance(message, dict):
-            raise RuntimeError("provider_missing_message")
-        content = message.get("content")
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            parts: List[str] = []
-            for item in content:
-                if isinstance(item, dict) and item.get("type") == "text":
-                    text = item.get("text")
-                    if isinstance(text, str):
-                        parts.append(text)
-            if parts:
-                return "\n".join(parts)
-        raise RuntimeError("provider_missing_content")
 
     @staticmethod
     def _normalize_result(raw: Dict[str, Any]) -> Dict[str, Any]:

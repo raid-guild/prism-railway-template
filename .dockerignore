@@ -1,0 +1,14 @@
+.git
+.github
+.codex-target-workspaces
+.env
+.env.*
+.next
+.prism-local
+**/.next
+**/.venv
+**/data
+**/dist
+**/node_modules
+**/*.log
+node_modules

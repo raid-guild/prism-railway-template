@@ -4,11 +4,15 @@
   "version": "0.1.0",
   "scripts": {
     "build": "next build",
-    "dev": "next dev --hostname 0.0.0.0 --port ${SITE_PORT:-3100}",
+    "dev": "set -a; [ -f ../../.env ] && . ../../.env; set +a; next dev --hostname 0.0.0.0 --port ${SITE_PORT:-3100}",
     "migrate": "tsx src/cli/migrate.ts",
     "bootstrap:admin": "tsx src/cli/bootstrap-admin.ts",
     "bootstrap:targets": "tsx src/cli/bootstrap-targets.ts",
     "start": "npm run migrate && next start --hostname 0.0.0.0 --port ${PORT:-3100}",
+    "pretest": "tsx --test src/lib/buzz-agent-api.test.ts src/lib/app-core/agent-avatar-storage.test.ts src/lib/app-core/agent-profiles.test.ts src/lib/app-core/agent-run-executor.test.ts src/lib/agent-profile-runtime-scope.test.ts src/lib/prism-lab/memory.test.ts src/lib/prism-lab-routes/memory-context-service.test.ts src/lib/role-access.test.ts",
+    "test": "tsx --test src/lib/admin-return-path.test.ts src/lib/app-core/capture-post-processing.test.ts src/lib/app-core/request-origin.test.ts src/lib/app-core/external-interactions.test.ts src/lib/app-core/hosted-skills.test.ts src/lib/app-core/runtime-client.test.ts src/lib/app-core/runtime-profiles.test.ts src/lib/app-core/source-adapter-policy.test.ts src/lib/app-core/workflow-event-feed.test.ts src/lib/app-core/workflow-reconciliation.test.ts src/lib/gateway-credential-assignment.test.ts src/lib/gateway-credential-catalog.test.ts src/lib/gateway-env-import.test.ts src/lib/gateway-presets.test.ts src/lib/hook-auth.test.ts src/lib/interactive-continuation-policy.test.ts src/lib/memory-document-upload.test.ts src/lib/prism-lab/active-run-projection.test.ts src/lib/prism-lab/activity-read-model.test.ts src/lib/prism-lab/checkpoint-receipt.test.ts src/lib/prism-lab/console-promotion.test.ts src/lib/prism-lab/conversation-viewport.test.ts src/lib/prism-lab/feature-flag.test.ts src/lib/prism-lab/inbox-refresh.test.ts src/lib/prism-lab/request-filters.test.ts src/lib/prism-lab/request-links.test.ts src/lib/prism-lab/request-management-intent.test.ts src/lib/prism-lab/request-message-actor.test.ts src/lib/prism-lab/request-read-model.test.ts src/lib/prism-lab/request-review-coordinator.test.ts src/lib/prism-lab/request-timeline.test.ts src/lib/prism-lab/workflow-explorer.test.ts src/lib/prism-lab-routes/request-ask-service.test.ts src/lib/prism-lab-routes/request-routes.test.ts src/lib/prism-version.test.ts src/lib/recording-hook-processing.test.ts src/lib/script-task-handoff-input.test.ts src/lib/source-history.test.ts src/lib/target-app-input.test.ts src/lib/task-runner-ledger-auth.test.ts src/lib/task-runner-trigger.test.ts src/lib/workflow-agent-run-prompt.test.ts src/lib/workflow-context-policy.test.ts src/lib/workflow-control-flow.test.ts src/lib/workflow-skill-scope.test.ts",
+    "test:maintenance": "tsx --test src/lib/app-core/prism-maintenance.test.ts",
+    "test:routing": "tsx --test src/lib/prism-lab/admin-entry.test.ts src/lib/request-workflow-selection.test.ts src/lib/recording-hook-processing.test.ts src/lib/prism-lab/console-promotion.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -37,15 +41,23 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "gray-matter": "^4.0.3",
     "lucide-react": "^1.8.0",
     "next": "^15.5.18",
     "next-themes": "^0.4.6",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-resizable-panels": "^2.1.9",
+    "rehype-autolink-headings": "^7.1.0",
+    "rehype-slug": "^6.0.0",
+    "rehype-stringify": "^10.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.2",
-    "tw-animate-css": "^1.4.0"
+    "tw-animate-css": "^1.4.0",
+    "unified": "^11.0.5"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

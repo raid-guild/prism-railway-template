@@ -84,8 +84,8 @@ export function buildTargetEnvironmentDeployPlan(input: {
     nextAction:
       warnings.length === 0
         ? targetEnvironment.deployBackend === 'local'
-          ? 'Run the target locally from the configured workspace and report the local URL back to the execution record.'
-          : 'Publish or update the review branch and report the PR preview URL back to the execution record when available.'
-        : 'Resolve the warnings before using this target for agent execution.',
+          ? 'Run the target locally from the configured workspace and report the local URL in the agent-run result and request artifacts when useful.'
+          : 'Publish or update the review branch and report the PR preview URL in the agent-run result and request artifacts when useful.'
+        : 'Resolve the warnings before using this target for agent-run work.',
   };
 }
