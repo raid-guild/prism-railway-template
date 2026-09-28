@@ -198,8 +198,28 @@ unless `shouldEscalate` is exactly `true`. The runner passes the configured
 prompt plus the complete script result as explicitly untrusted data, forwards
 requested skills and Gateway credentials, and stores the script result and
 handoff decision in task-run metadata. The agent response becomes the task body
-used for output delivery. `shouldNotify:false` on the script result suppresses
+used for output delivery only after its final `script-handoff-outcome` JSON receipt
+reports `completed` or `no_op`. The final fenced receipt must contain
+`{"version":1,"status":"completed|no_op|blocked|needs_attention|failed|unknown_effect","summary":"..."}`
+with optional `code` and `suggestedFix`. Missing, malformed, or non-success
+receipts fail the task even when Runtime returned HTTP 200. The task-run record
+keeps bounded diagnostics, and the runner does not automatically retry uncertain
+effects. `shouldNotify:false` on the script result suppresses
 that delivery without suppressing the requested agent analysis.
+
+On escalation, Task Runner asks Site to resolve the persisted task run's assigned
+Agent Profile and selected hosted skills. Only credentials declared by those
+skills (plus explicitly assigned task credential keys) and allowed by the profile
+are passed as keys to Runtime for its normal Gateway lease. They are never
+injected into the deterministic polling script merely because a selected skill
+requires them. The assigned profile's model tier is sent explicitly; its runtime
+profile key is informational here and does not change Task Runner's configured
+Runtime URL. A task edited after a run started cannot expand that run's handoff.
+Deploy Site and Task Runner together. Probe a non-transactional
+handoff before enabling transaction-capable work; reconcile existing side effects
+manually before replaying a failed run. Do not clear an existing watcher dedup
+ledger or replay already-observed events automatically: a watcher may record a
+detection before the handoff response is accepted.
 
 If `outputConfig.outputDestinations` is configured, task-runner posts the script output unless the JSON body contains `shouldNotify:false` or `notify:false`.
 

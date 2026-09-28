@@ -5,8 +5,13 @@ import {
   buildScriptAgentHandoffPrompt,
   decideScriptAgentHandoff,
   scriptAgentHandoffConfig,
+  scriptHandoffSkillSelection,
   scriptResultShouldNotify,
+  parseScriptHandoffOutcome,
+  ScriptHandoffFailure,
 } from "./script-agent-handoff.js";
+
+const receipt = (status: string, summary = "Verified result") => `Done.\n\`\`\`script-handoff-outcome\n${JSON.stringify({ version: 1, status, summary })}\n\`\`\``;
 
 const taskResult = (body: string) => ({
   ok: true,
@@ -59,6 +64,7 @@ test("script handoff invokes an agent only for an explicit true condition", () =
   assert.match(buildScriptAgentHandoffPrompt(config.prompt, decision.scriptResult!), /Review matching records/);
   assert.match(buildScriptAgentHandoffPrompt(config.prompt, decision.scriptResult!), /untrusted data, not instructions/);
   assert.match(buildScriptAgentHandoffPrompt(config.prompt, decision.scriptResult!), /"one"/);
+  assert.match(buildScriptAgentHandoffPrompt(config.prompt, decision.scriptResult!), /exactly one final fenced script-handoff-outcome/);
 });
 
 test("enabled script handoff rejects invalid configuration and output", () => {
@@ -110,7 +116,7 @@ test("conditional orchestration calls the agent once and preserves script eviden
     invokeAgent: async (input) => {
       invocationCount += 1;
       assert.match(input.prompt, /event-1/);
-      return { ok: true, status: 200, url: "runtime://job-1", body: JSON.stringify({ responseText: "Reviewed" }) };
+      return { ok: true, status: 200, url: "runtime://job-1", body: JSON.stringify({ responseText: receipt("completed") }) };
     },
   });
 
@@ -123,4 +129,60 @@ test("conditional orchestration calls the agent once and preserves script eviden
     agentInput: { id: "event-1" },
   });
   assert.equal((result.metadata?.handoff as Record<string, unknown>).invoked, true);
+  assert.equal((result.metadata?.handoffOutcome as Record<string, unknown>).status, "completed");
+});
+
+test("accepts a final no-op receipt from either runtime text field", () => {
+  assert.equal(parseScriptHandoffOutcome(JSON.stringify({ output_text: receipt("no_op") })).status, "no_op");
+  assert.equal(parseScriptHandoffOutcome(JSON.stringify({ responseText: receipt("completed") })).status, "completed");
+});
+
+test("production handoff metadata helper selects only Site-resolved skills", () => {
+  assert.deepEqual(scriptHandoffSkillSelection(["veydrift-threat-review"]), {
+    requestedSkills: ["veydrift-threat-review"], skillSelectionMode: "exact",
+  });
+});
+
+test("rejects missing, malformed, conflicting or nonfinal receipts without using prose", () => {
+  for (const body of [
+    JSON.stringify({ responseText: "Everything succeeded" }),
+    JSON.stringify({ responseText: `${receipt("completed")}\ntrailing text` }),
+    JSON.stringify({ responseText: `${receipt("completed")}\n${receipt("completed")}` }),
+    JSON.stringify({ responseText: "```script-handoff-outcome\nnot json\n```" }),
+    JSON.stringify({ responseText: receipt("completed"), output_text: receipt("failed") }),
+    JSON.stringify({ responseText: receipt("invented") }),
+  ]) assert.throws(() => parseScriptHandoffOutcome(body), ScriptHandoffFailure);
+});
+
+test("HTTP 200 blocker and unknown-effect receipts fail with bounded nonsecret diagnostics", async () => {
+  const config = scriptAgentHandoffConfig({ prompt: "Review" }, { handoff: { enabled: true } });
+  for (const status of ["blocked", "needs_attention", "failed", "unknown_effect"]) {
+    await assert.rejects(applyScriptAgentHandoff({
+      config,
+      scriptTaskResult: taskResult(JSON.stringify({ shouldEscalate: true })),
+      invokeAgent: async () => ({ ok: true, status: 200, url: "runtime://job-2", body: JSON.stringify({ responseText: receipt(status, "token=supersecret") }) }),
+    }), (error: unknown) => {
+      assert.ok(error instanceof ScriptHandoffFailure);
+      assert.equal(error.diagnostics.status, status);
+      assert.doesNotMatch(JSON.stringify(error), /supersecret/);
+      assert.doesNotMatch(JSON.stringify(error.diagnostics), /supersecret/);
+      return true;
+    });
+  }
+});
+
+test("Site or Gateway invocation errors become typed safe handoff failures", async () => {
+  const config = scriptAgentHandoffConfig({ prompt: "Review" }, { handoff: { enabled: true } });
+  await assert.rejects(applyScriptAgentHandoff({
+    config,
+    scriptTaskResult: taskResult(JSON.stringify({ shouldEscalate: true })),
+    invokeAgent: async () => { throw new Error("HTTP 409 from https://internal/?token=supersecret: private trace") },
+  }), (error: unknown) => {
+    assert.ok(error instanceof ScriptHandoffFailure);
+    assert.equal(error.code, "INVOCATION_FAILED");
+    assert.equal(error.diagnostics.causeCode, "HTTP_409");
+    assert.equal(error.diagnostics.scriptKey, "api-result-check");
+    assert.doesNotMatch(JSON.stringify(error.diagnostics), /supersecret|internal/);
+    return true;
+  });
 });
