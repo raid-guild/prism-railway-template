@@ -201,6 +201,14 @@ missing `shouldEscalate` value completes without invoking Codex; exactly `true`
 starts one agent run with the script result supplied as untrusted data. Put
 requested skill names in `instructionConfig.requestedSkills`. Do not describe
 `shouldEscalate` as advisory when this handoff is enabled.
+The agent must end with exactly one fenced `script-handoff-outcome` JSON receipt:
+`{"version":1,"status":"completed","summary":"Verified result"}`. Valid statuses
+are `completed`, `no_op`, `blocked`, `needs_attention`, `failed`, and
+`unknown_effect`; optional `code` and `suggestedFix` may explain recovery.
+Only completed/no-op receipts make the task succeed. Missing or uncertain receipts
+fail the task, so inspect side effects before a manual retry. Handoff-only skill
+credentials are resolved from Site's persisted task, assigned profile, and hosted
+skill declarations when escalation occurs; do not add them to the polling script.
 
 When a script needs an organization credential, configure it in Gateway and
 declare its credential key in `agentConfig.gatewayCredentials`. Read the leased environment variable

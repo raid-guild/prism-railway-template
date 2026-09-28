@@ -1,5 +1,6 @@
 import express, { type Request, type Response } from "express";
 import { ScriptFailure, redactDiagnostic } from "./script-failure.js";
+import { ScriptHandoffFailure } from "./script-agent-handoff.js";
 import { doctorMergeSkills } from "./prism-doctor-skills.js";
 import { findOpenWorkflowRequests } from './workflow-single-flight.js';
 import { CronExpressionParser } from "cron-parser";
@@ -17,6 +18,7 @@ import { workflowContextFindings } from "./prism-doctor-workflow-context.js";
 import {
   applyScriptAgentHandoff,
   scriptAgentHandoffConfig,
+  scriptHandoffSkillSelection,
 } from "./script-agent-handoff.js";
 
 type TaskStatus = "idle" | "running" | "succeeded" | "failed" | "disabled";
@@ -30,7 +32,7 @@ type RunnableTask = {
   cron: string;
   taskType: string;
   outputConfig: Record<string, unknown>;
-  run: () => Promise<TaskRunResult>;
+  run: (context?: { taskRunId: string | null }) => Promise<TaskRunResult>;
 };
 
 type BuiltInTask = RunnableTask & {
@@ -84,6 +86,7 @@ type AppTaskRun = {
 
 type AppTask = {
   key: string;
+  updatedAt?: string;
   name: string;
   enabled: boolean;
   scheduleCron: string | null;
@@ -1089,23 +1092,27 @@ function buildScriptRunnerTask(siteTask: AppTask): RunnableTask | null {
     defaultCron: cron,
     enabled: siteTask.enabled,
     cron,
-    run: async () => {
+    run: async (context) => {
       const scriptResult = await runSiteTaskScript({ siteTask, scriptKey, params, timeoutMs });
       return applyScriptAgentHandoff({
         config: handoffConfig,
         scriptTaskResult: scriptResult,
         invokeAgent: async ({ prompt, scriptResult: parsedScriptResult, handoff }) => {
+          if (!context?.taskRunId) throw new ScriptHandoffFailure("TASK_RUN_ID_MISSING");
+          if (!siteTask.updatedAt) throw new ScriptHandoffFailure("TASK_REVISION_MISSING");
+          const resolved = await appApiRequest(`/agent/tasks/runs/${encodeURIComponent(context.taskRunId)}/handoff-context?expectedTaskUpdatedAt=${encodeURIComponent(siteTask.updatedAt)}`, { method: "GET" });
+          const handoffContext = isRecord(resolved?.handoffContext) ? resolved.handoffContext : null;
+          if (!handoffContext || handoffContext.taskRunId !== context.taskRunId || !Array.isArray(handoffContext.credentialKeys)
+            || !Array.isArray(handoffContext.skills)) throw new ScriptHandoffFailure("CONTEXT_INVALID");
           const baseUrl = requireBaseUrl("CODEX_RUNTIME_BASE_URL", codexRuntimeBaseUrl());
           return postCodexRuntimeJson(baseUrl, {
             prompt,
+            modelTier: handoffContext.modelTier,
             sessionId: `script-handoff:${siteTask.key}:${Date.now()}`,
             codexThreadId: null,
             recentHistory: [],
-            credentials: requestedGatewayKeysFromConfig(siteTask.agentConfig, [
-              "gatewayCredentials",
-              "gateway_credentials",
-            ]),
-            context: { delegatedActorId: `task:${siteTask.key}` },
+            credentials: handoffContext.credentialKeys.map((key) => ({ key })),
+            context: { delegatedActorId: `task:${siteTask.key}`, taskRunId: context.taskRunId },
             metadata: {
               transport: "task-runner",
               taskKey: siteTask.key,
@@ -1113,7 +1120,11 @@ function buildScriptRunnerTask(siteTask: AppTask): RunnableTask | null {
               taskType: siteTask.taskType,
               scriptKey,
               scriptResult: parsedScriptResult,
-              requestedSkills: mergeRequestedSkills(siteTask),
+              ...scriptHandoffSkillSelection(handoffContext.skills as string[]),
+              agentRunId: handoffContext.agentRunId,
+              agentProfile: handoffContext.profile,
+              runtimeProfileKey: handoffContext.runtimeProfileKey,
+              policyInstructions: handoffContext.policyInstructions,
               allowEmptyResponse: true,
               handoff,
             },
@@ -2609,7 +2620,7 @@ async function runTask(task: RunnableTask, source: "schedule" | "manual"): Promi
   console.log(JSON.stringify({ event: "task.started", task: task.key, source, at: taskState.lastRunAt }));
 
   try {
-    const result = await task.run();
+    const result = await task.run({ taskRunId: appRun?.id ?? null });
     const delivery = await deliverTaskOutput(task, result);
     result.delivery = delivery;
     taskState.status = "succeeded";
@@ -2643,7 +2654,8 @@ async function runTask(task: RunnableTask, source: "schedule" | "manual"): Promi
     taskState.nextRunAt = nextCronDate(task.cron);
     await updateTaskRunInSite(appRun, "failed", {
       errorMessage: message,
-      ...(error instanceof ScriptFailure ? { outputSnapshot: { diagnostics: error.diagnostics } } : {}),
+      ...(error instanceof ScriptFailure || error instanceof ScriptHandoffFailure
+        ? { outputSnapshot: { diagnostics: error.diagnostics } } : {}),
     });
     console.error(JSON.stringify({ event: "task.failed", task: task.key, source, error: message, at: nowIso() }));
     throw error;
