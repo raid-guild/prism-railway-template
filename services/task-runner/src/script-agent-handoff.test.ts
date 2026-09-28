@@ -186,3 +186,30 @@ test("Site or Gateway invocation errors become typed safe handoff failures", asy
     return true;
   });
 });
+
+test("failure snapshots exclude arbitrary secrets in every agent-authored receipt field", async () => {
+  const config = scriptAgentHandoffConfig({ prompt: "Review" }, { handoff: { enabled: true } });
+  const summarySecret = "unlabelled-value-7f3a92";
+  const fixSecret = "another-unlabelled-value-8e4b01";
+  const agentCode = "ARBITRARY_SECRET_VALUE";
+  for (const status of ["blocked", "needs_attention", "failed", "unknown_effect"]) {
+    const responseText = "```script-handoff-outcome\n" + JSON.stringify({
+      version: 1, status, summary: summarySecret, suggestedFix: fixSecret, code: agentCode,
+    }) + "\n```";
+    await assert.rejects(applyScriptAgentHandoff({
+      config,
+      scriptTaskResult: taskResult(JSON.stringify({ shouldEscalate: true })),
+      invokeAgent: async () => ({ ok: true, status: 200, url: "runtime://job-3", body: JSON.stringify({ responseText }) }),
+    }), (error: unknown) => {
+      assert.ok(error instanceof ScriptHandoffFailure);
+      const snapshot = JSON.stringify({ diagnostics: error.diagnostics });
+      for (const secret of [summarySecret, fixSecret, agentCode]) assert.equal(snapshot.includes(secret), false);
+      assert.equal(error.diagnostics.code, "SCRIPT_RUNNER_HANDOFF_NON_SUCCESS_OUTCOME");
+      assert.equal(error.diagnostics.status, status);
+      assert.equal(error.diagnostics.scriptKey, "api-result-check");
+      assert.equal(error.diagnostics.runtimeJobId, "job-3");
+      assert.equal("outcome" in error.diagnostics, false);
+      return true;
+    });
+  }
+});

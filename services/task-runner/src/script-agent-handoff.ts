@@ -165,7 +165,6 @@ export async function applyScriptAgentHandoff(input: {
   }
   if (outcome.status !== "completed" && outcome.status !== "no_op") {
     throw new ScriptHandoffFailure("NON_SUCCESS_OUTCOME", outcome.status, {
-      outcome,
       scriptKey: typeof input.scriptTaskResult.metadata?.scriptKey === "string" ? input.scriptTaskResult.metadata.scriptKey : undefined,
       runtimeUrl: agentResult.url,
     });
@@ -192,14 +191,15 @@ export type ScriptHandoffOutcome = { version: 1; status: ScriptHandoffOutcomeSta
 
 export class ScriptHandoffFailure extends Error {
   readonly diagnostics: Record<string, unknown>;
-  constructor(readonly code: string, status?: ScriptHandoffOutcomeStatus, context?: { outcome?: ScriptHandoffOutcome; scriptKey?: string; runtimeUrl?: string }) {
+  constructor(readonly code: string, status?: ScriptHandoffOutcomeStatus, context?: { scriptKey?: string; runtimeUrl?: string }) {
     super(`SCRIPT_RUNNER_HANDOFF_${code}${status ? `:${status}` : ""}`);
     this.name = "ScriptHandoffFailure";
     this.diagnostics = {
       stage: "agent_handoff", code: `SCRIPT_RUNNER_HANDOFF_${code}`, status: status ?? null,
       ...(context?.scriptKey ? { scriptKey: context.scriptKey.slice(0, 100) } : {}),
       ...(context?.runtimeUrl ? { runtimeJobId: /^[A-Za-z0-9_-]{1,100}$/.exec(context.runtimeUrl.split("/").at(-1) ?? "")?.[0] ?? null } : {}),
-      ...(context?.outcome ? { outcome: context.outcome } : {}),
+      // Never persist agent-authored receipt text or codes in failure diagnostics.
+      // Pattern-based redaction cannot reliably identify arbitrary credential values.
       recovery: "Inspect the agent run and reconcile any completed side effects before manually retrying. No automatic retry was started.",
     };
   }
