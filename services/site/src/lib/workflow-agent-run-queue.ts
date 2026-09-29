@@ -9,6 +9,7 @@ import {
   expireStaleRunningAgentRuns,
   findActiveAgentRunByIdempotencyKey,
   getChangeRequest,
+  getDb,
   getAgentRun,
   getWorkflowByKey,
   updateAgentRun,
@@ -18,11 +19,18 @@ import {
   workflowAgentExecutor,
   buildAccountabilitySnapshot,
   type AgentRunRecord,
+  getScriptRevision,
+  getTaskScriptByKey,
+  enqueueWorkflowScriptAttempt,
+  activeWorkflowScriptRun,
+  expireWorkflowScriptLeases,
 } from "@/lib/app-core"
-import { handleResponsePost } from "@/lib/response-route-handler"
 import { loopIterationKeyForRequest, resolveControlFlowSteps } from "@/lib/workflow-control-flow"
 import { findStepByKey, gateEventAction, nextStepForAction, stepKey, stepType, workflowSteps } from "@/lib/workflow-steps"
 import { buildWorkflowAgentRunPrompt } from "@/lib/workflow-agent-run-prompt"
+import { workflowScriptSnapshot } from "@/lib/workflow-health-snapshot"
+import { validateWorkflowScriptSteps } from "@/lib/workflow-script-validation"
+import { recoverWorkflowScriptCompletions } from "@/lib/workflow-script-completion"
 
 type EnqueueWorkflowAgentRunInput = {
   request: ChangeRequestRecord
@@ -39,6 +47,7 @@ type EnqueueWorkflowAgentRunResult = {
   reason?: string
   status?: number
   agentRun?: ReturnType<typeof getAgentRun>
+  scriptRun?: ReturnType<typeof enqueueWorkflowScriptAttempt>
   advanced?: boolean
   advancedToStepKey?: string | null
   error?: string
@@ -162,6 +171,7 @@ async function executeClaimedWorkflowAgentRun(agentRun: AgentRunRecord) {
       sessionId = session.id
       updateAgentRun(agentRun.id, { sessionId })
     }
+    const { handleResponsePost } = await import("@/lib/response-route-handler")
     const response = await handleResponsePost(
       new Request(new URL("/agent/responses", workflowAgentRunString(input, "baseUrl")?.trim() || defaultBaseUrl()), {
         method: "POST",
@@ -202,6 +212,16 @@ async function executeClaimedWorkflowAgentRun(agentRun: AgentRunRecord) {
 let dispatcherScheduled = false
 let dispatcherRunning = false
 let dispatcherHeartbeat: ReturnType<typeof setInterval> | null = null
+let scriptRecoveryRunning = false
+
+async function recoverScripts() {
+  if (scriptRecoveryRunning) return
+  scriptRecoveryRunning = true
+  try {
+    expireWorkflowScriptLeases()
+    await recoverWorkflowScriptCompletions()
+  } finally { scriptRecoveryRunning = false }
+}
 
 export function wakeWorkflowAgentRunDispatcher() {
   if (dispatcherScheduled) {
@@ -216,11 +236,13 @@ export function wakeWorkflowAgentRunDispatcher() {
 
 export function startWorkflowAgentRunDispatcher() {
   wakeWorkflowAgentRunDispatcher()
+  void recoverScripts()
   if (dispatcherHeartbeat) {
     return
   }
   dispatcherHeartbeat = setInterval(() => {
     wakeWorkflowAgentRunDispatcher()
+    void recoverScripts()
   }, dispatcherIntervalMs())
   dispatcherHeartbeat.unref?.()
 }
@@ -407,8 +429,50 @@ export function enqueueWorkflowAgentRun(input: EnqueueWorkflowAgentRunInput): En
   if (runnableStepType === "terminal") {
     return { queued: false, reason: "WORKFLOW_ALREADY_TERMINAL", status: 409 }
   }
+  if (runnableStepType === "script") {
+    if (!workflow || validateWorkflowScriptSteps(workflow.definition)) {
+      return { queued: false, reason: "WORKFLOW_SCRIPT_MANIFEST_INVALID", status: 409 }
+    }
+    const config = runnableStep.scriptConfig as Record<string, unknown>
+    const revision = getScriptRevision(String(config.revisionId))
+    const authored = getTaskScriptByKey(String(config.scriptKey))
+    if (!revision || !authored?.enabled || revision.checksum !== config.checksum) {
+      return { queued: false, reason: "WORKFLOW_SCRIPT_REVISION_UNAVAILABLE", status: 409 }
+    }
+    const fallback = findStepByKey(steps, String(config.fallbackStepKey))!
+    const fallbackExecutor = workflowAgentExecutor(workflow.definition, fallback)
+    try {
+      const snapshot = workflowScriptSnapshot({ request: input.request, binding: String(config.inputBinding), config })
+      const result = getDb().transaction(() => {
+        const alreadyActive = activeWorkflowScriptRun(workflowRun.id)
+        if (alreadyActive) return { queued: true, duplicate: true, status: 202, scriptRun: alreadyActive }
+        if (stepType(currentStep) === "gate" && stepKey(currentStep) !== runnableStepKey) {
+          updateChangeRequest(input.request.id, { workflowStepKey: runnableStepKey })
+          updateWorkflowRun({ requestId: input.request.id, currentStepKey: runnableStepKey, status: "active", completedAt: null })
+          createWorkflowEvent({ workflowRunId: workflowRun.id, requestId: input.request.id, stepKey: runnableStepKey,
+            eventType: "workflow.step_changed", actorType: "system", payload: { previousStepKey: stepKey(currentStep), nextStepKey: runnableStepKey } })
+        }
+        const scriptRun = enqueueWorkflowScriptAttempt({ requestId: input.request.id, workflowRunId: workflowRun.id,
+          stepKey: runnableStepKey, iterationKey: loopIterationKeyForRequest({ requestId: input.request.id }) ?? "initial",
+          revisionId: revision.id, checksum: revision.checksum, config, snapshot,
+        profileId: fallbackExecutor.profileId, policy: { fallbackProfileId: fallbackExecutor.profileId,
+            fallbackProfileVersion: fallbackExecutor.profileVersion, workflowVersion: workflow.version,
+            nextStepKey: typeof runnableStep.next === "string" ? runnableStep.next : null } })
+        createWorkflowEvent({ workflowRunId: workflowRun.id, requestId: input.request.id, stepKey: runnableStepKey,
+          eventType: "script.queued", actorType: "system", payload: { scriptRunId: scriptRun.id, revisionId: revision.id,
+            attempt: scriptRun.attempt } })
+        return { queued: true, status: 202, scriptRun }
+      })()
+      return result
+    } catch (error) {
+      return { queued: false, reason: error instanceof Error ? error.message : "WORKFLOW_SCRIPT_QUEUE_FAILED", status: 409 }
+    }
+  }
   if (runnableStepType !== "agent" && runnableStepType !== "checkpoint") {
     return { queued: false, reason: "WORKFLOW_STEP_NOT_RUNNABLE", status: 409 }
+  }
+  if (activeWorkflowScriptRun(workflowRun.id)) {
+    return { queued: false, reason: "WORKFLOW_SCRIPT_ACTIVE", status: 409 }
   }
 
   const idempotencyKey = workflowStepRunIdempotencyKey({

@@ -70,7 +70,7 @@ export async function autoStartWorkflowRequest(
     return { started: false, reason: "workflow_step_not_found" }
   }
   const type = stepType(step)
-  if (type !== "agent" && type !== "loop") {
+  if (type !== "agent" && type !== "loop" && type !== "script") {
     return { started: false, reason: "current_step_is_not_agent" }
   }
 

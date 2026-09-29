@@ -107,6 +107,22 @@ type ReviewRun = {
   executionMode?: string | null
 }
 
+type ReviewScriptRun = {
+  id: string
+  status: string
+  stepKey: string
+  attempt: number
+  revisionId: string
+  checksum: string
+  errorCode: string | null
+  exitCode: number | null
+  createdAt: string
+  claimedAt: string | null
+  finishedAt: string | null
+  receiptArtifactId: string | null
+  resultArtifactId: string | null
+}
+
 type ReviewArtifact = {
   id: string
   name: string
@@ -170,6 +186,7 @@ type RequestReview = {
   agentSession: { id: string; source: string } | null
   agentMessages: ReviewMessage[]
   agentRuns: ReviewRun[]
+  scriptRuns?: ReviewScriptRun[]
   artifacts: ReviewArtifact[]
   workflowEvents: ReviewEvent[]
   externalRefs: ReviewExternalRef[]
@@ -184,7 +201,7 @@ type RequestActionProposal =
   | { kind: "check-status"; reason: string; summary: string }
   | { kind: "move-step"; targetStepKey: string; runAfterMove: boolean; reason: string; summary: string }
 
-const activeRunStatuses = new Set(["queued", "claimed", "running"])
+const activeRunStatuses = new Set(["queued", "claimed", "running", "canceling", "completing"])
 const failedRunStatuses = new Set(["failed", "canceled"])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -255,6 +272,8 @@ function workspaceState(review: RequestReview): WorkspaceState {
   const workflowStatus = review.workflowRun?.status.toLowerCase()
   if (workflowStatus === "completed" || workflowStatus === "canceled" || review.changeRequest.closedAt) return "completed"
   const active = review.agentRuns.find((run) => activeRunStatuses.has(run.status.toLowerCase()))
+  const activeScript = review.scriptRuns?.find((run) => activeRunStatuses.has(run.status.toLowerCase()))
+  if (activeScript) return activeScript.status === "queued" ? "queued" : "running"
   const activeStatus = active?.status.toLowerCase()
   if (activeStatus === "queued" || activeStatus === "claimed") return "queued"
   if (activeStatus === "running") return "running"
@@ -267,13 +286,14 @@ function workspaceState(review: RequestReview): WorkspaceState {
   if (step.type === "checkpoint" && runStatus === "succeeded" && latest?.workflowStepKey === step.key) {
     return "checkpoint-passed"
   }
+  if (review.scriptRuns?.[0]?.status === "failed") return "failed"
   if (runStatus && failedRunStatuses.has(runStatus)) return "failed"
   return "ready"
 }
 
 const statePresentation: Record<WorkspaceState, { label: string; description: string }> = {
   queued: { label: "Queued", description: "A run is waiting for workflow capacity." },
-  running: { label: "Running", description: "An agent run is actively working on this request." },
+  running: { label: "Running", description: "A workflow step is actively working on this request." },
   failed: { label: "Failed", description: "The latest run failed. Review its error and evidence before retrying." },
   blocked: { label: "Blocked", description: "The workflow reported a blocker that needs attention." },
   attention: { label: "Needs attention", description: "The workflow is waiting for operator review or additional context." },
@@ -462,9 +482,11 @@ export function RequestWorkspace({
     })
   }, [review])
   const state = review ? workspaceState(review) : null
-  const failureDetails = state === "failed" ? runFailureDetails(review?.agentRuns[0]?.errorMessage) : null
+  const latestScriptFailure = review?.scriptRuns?.[0]?.status === "failed" ? review.scriptRuns[0] : null
+  const failureDetails = state === "failed" && !latestScriptFailure ? runFailureDetails(review?.agentRuns[0]?.errorMessage) : null
   const activeAgentRun = review?.agentRuns.find((run) => activeRunStatuses.has(run.status.toLowerCase())) ?? null
-  const activeRun = Boolean(activeAgentRun)
+  const activeScriptRun = review?.scriptRuns?.find((run) => activeRunStatuses.has(run.status.toLowerCase())) ?? null
+  const activeRun = Boolean(activeAgentRun || activeScriptRun)
   const participatingAgents = useMemo(() => {
     const profiles = new Map<string, { key: string | null; name: string }>()
     for (const run of review?.agentRuns ?? []) {
@@ -480,8 +502,8 @@ export function RequestWorkspace({
   const canComment = review?.capabilities.canComment === true
   const canViewRequests = review?.capabilities.canViewRequests === true
   const canRun = review?.capabilities.canRunAgent === true
-  const canInvoke = canRun && !activeRun && !terminal && !attention && Boolean(step && ["gate", "agent", "checkpoint", "loop"].includes(step.type))
-  const canRetry = canRun && !activeRun && !terminal && Boolean(step && ["agent", "checkpoint", "loop"].includes(step.type))
+  const canInvoke = canRun && !activeRun && !terminal && !attention && Boolean(step && ["gate", "agent", "checkpoint", "loop", "script"].includes(step.type))
+  const canRetry = canRun && !activeRun && !terminal && Boolean(step && ["agent", "checkpoint", "loop", "script"].includes(step.type))
   const canCheckStatus = canRun && !activeRun && !terminal && step?.type === "checkpoint"
   const invokeLabel = step?.type === "gate"
     ? "Continue gate"
@@ -660,18 +682,20 @@ export function RequestWorkspace({
 
   async function stopCurrentRun() {
     const reason = interruptionReason.trim()
-    if (!activeAgentRun || !reason || !canRun) return
+    if ((!activeAgentRun && !activeScriptRun) || !reason || !canRun) return
     const succeeded = await mutate(
       "stop-run",
       () => fetch(
-        `/admin/change-requests/${encodeURIComponent(request.id)}/runs/${encodeURIComponent(activeAgentRun.id)}/cancel`,
+        activeScriptRun
+          ? `/admin/change-requests/${encodeURIComponent(request.id)}/scripts/${encodeURIComponent(activeScriptRun.id)}/cancel`
+          : `/admin/change-requests/${encodeURIComponent(request.id)}/runs/${encodeURIComponent(activeAgentRun!.id)}/cancel`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ reason }),
         },
       ),
-      "Current agent run stopped. The request remains on the same workflow step.",
+      "Current run is stopping. The request remains on the same workflow step.",
     )
     if (succeeded) {
       setInterruptionDialog(null)
@@ -862,13 +886,18 @@ export function RequestWorkspace({
                   <p className="break-words font-mono text-xs">{failureDetails.detail}</p>
                   <p className="mt-1 text-muted-foreground">{failureDetails.recovery}</p>
                 </div> : null}
+                {state === "failed" && latestScriptFailure ? <div className="mt-3 border-l-2 border-destructive pl-3 text-sm" role="status">
+                  <p className="font-semibold">Script attempt failed</p>
+                  <p className="break-words font-mono text-xs">{latestScriptFailure.errorCode ?? "SCRIPT_ATTEMPT_FAILED"}</p>
+                  <p className="mt-1 text-muted-foreground">Review the pinned attempt receipt and result before retrying this step.</p>
+                </div> : null}
                 <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
                   <div className="flex items-center gap-2"><GitBranch aria-hidden="true" /><dt className="sr-only">Current phase</dt><dd>{step.label} · {step.type}</dd></div>
-                  <div className="flex items-center gap-2"><TerminalSquare aria-hidden="true" /><dt className="sr-only">Runs</dt><dd>{review.agentRuns.length} recorded run{review.agentRuns.length === 1 ? "" : "s"}</dd></div>
+                  <div className="flex items-center gap-2"><TerminalSquare aria-hidden="true" /><dt className="sr-only">Runs</dt><dd>{review.agentRuns.length + (review.scriptRuns?.length ?? 0)} recorded run{review.agentRuns.length + (review.scriptRuns?.length ?? 0) === 1 ? "" : "s"}</dd></div>
                   <div className="flex items-center gap-2"><Bot aria-hidden="true" /><dt className="sr-only">Current executor</dt><dd>{currentExecutor?.agentProfileName ? <>Executor · {currentExecutor.agentProfileKey ? <Link className="underline" href={`/admin/lab/agents/${encodeURIComponent(currentExecutor.agentProfileKey)}`}>{currentExecutor.agentProfileName}</Link> : currentExecutor.agentProfileName}{currentExecutor.executionMode ? ` · ${currentExecutor.executionMode}` : ""}</> : "Executor · Legacy / unattributed"}</dd></div>
                   <div className="flex items-center gap-2"><UsersRound aria-hidden="true" /><dt className="sr-only">Participating agents</dt><dd>{participatingAgents.length ? <>Participants · {participatingAgents.map((profile, index) => <span key={profile.key || profile.name}>{index ? ", " : ""}{profile.key ? <Link className="underline" href={`/admin/lab/agents/${encodeURIComponent(profile.key)}`}>{profile.name}</Link> : profile.name}</span>)}</> : "Participants · Legacy / unattributed"}</dd></div>
                 </dl>
-                {activeAgentRun && canRun ? (
+                {(activeAgentRun || activeScriptRun) && canRun ? (
                   <Button
                     type="button"
                     variant="outline"
@@ -1117,6 +1146,17 @@ export function RequestWorkspace({
                   </details>
                 </li>
               ))}</ol> : <p className="text-sm text-muted-foreground">No agent runs recorded.</p>}
+            </TechnicalSection>
+            <TechnicalSection summary="Script attempts" count={review.scriptRuns?.length ?? 0}>
+              {review.scriptRuns?.length ? <ol className="space-y-3">{review.scriptRuns.slice(0, 30).map((run) => (
+                <li key={run.id} className="text-sm">
+                  <div className="flex flex-wrap items-center gap-2"><Badge variant={run.status === "failed" ? "destructive" : "outline"}>{run.status}</Badge><span className="font-mono text-xs">{run.stepKey} · attempt {run.attempt}</span></div>
+                  <p className="mt-1 text-xs text-muted-foreground">Queued {displayTime(run.createdAt)}{run.finishedAt ? ` · finished ${displayTime(run.finishedAt)}` : ""}</p>
+                  <p className="mt-1 break-all text-xs text-muted-foreground">Revision {run.revisionId} · {run.checksum}</p>
+                  {run.errorCode ? <p className="mt-1 text-xs text-destructive">{run.errorCode}</p> : null}
+                  {run.receiptArtifactId ? <p className="mt-1 text-xs">Receipt saved in request artifacts</p> : null}
+                </li>
+              ))}</ol> : <p className="text-sm text-muted-foreground">No script attempts recorded.</p>}
             </TechnicalSection>
           </section>
             </TabsContent>

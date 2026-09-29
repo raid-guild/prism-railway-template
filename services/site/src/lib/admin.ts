@@ -237,6 +237,7 @@ export type AdminBoardData = {
   workflows?: WorkflowRecord[]
   /** Non-sensitive occupancy summaries for actual active request-linked runs. */
   activeRequestAgentRuns?: ActiveRequestAgentRunSummary[]
+  activeRequestScriptRuns?: Array<{ id: string; requestId: string; status: string }>
 }
 
 export type AdminWorkspaceData = AdminBoardData & {

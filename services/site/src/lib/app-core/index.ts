@@ -1,5 +1,18 @@
 export { loadConfig, type AppConfig, type CommunityProvider } from './config';
 export { getDb, closeDb, runMigrations } from './db';
+export { getWorkflowHealthDelivery, recordWorkflowHealthDelivery, type WorkflowHealthDelivery } from './workflow-health-deliveries';
+export {
+  checksumScriptSource, checksumScriptInput, createScriptRevision, getScriptRevision, listScriptRevisions,
+  getWorkflowScriptRun, listWorkflowScriptRuns, activeWorkflowScriptRun, enqueueWorkflowScriptAttempt,
+  listActiveWorkflowScriptRuns,
+  claimWorkflowScriptAttempt, renewWorkflowScriptLease, beginWorkflowScriptCompletion,
+  finishWorkflowScriptAttempt, attachFailedWorkflowScriptArtifacts, markWorkflowScriptAdvanced,
+  supersedeWorkflowScriptAttempt, listUnadvancedWorkflowScriptRuns,
+  expireWorkflowScriptLeases, cancelWorkflowScriptRuns,
+  acknowledgeWorkflowScriptCancellation,
+  requestWorkflowScriptCancellation,
+  type ScriptOutcome, type ScriptRevision, type WorkflowScriptRun,
+} from './workflow-script-store';
 export { detectAgentAvatarMimeType, readAgentAvatar, validateAgentAvatar, writeAgentAvatar, type AgentAvatarMimeType } from './agent-avatar-storage';
 export {
   adminAgentProfileId,

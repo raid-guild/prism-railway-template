@@ -2,6 +2,7 @@ import { loadConfig } from './config';
 import { listAgentRuns, listChangeRequests, listTargetApps, listTargetEnvironments, listWorkflows } from './repository';
 import { resolveRuntimeProfile } from './runtime-profiles';
 import { projectActiveRequestAgentRuns } from '../prism-lab/active-run-projection';
+import { listActiveWorkflowScriptRuns } from './workflow-script-store';
 
 async function fetchJson(baseUrl: string, path: string) {
   if (!baseUrl) {
@@ -99,5 +100,6 @@ export function getAdminBoardSnapshot(input: { targetAppId?: string } = {}) {
     }),
     workflows: listWorkflows(),
     activeRequestAgentRuns,
+    activeRequestScriptRuns: listActiveWorkflowScriptRuns(200).map((run) => ({ id: run.id, requestId: run.requestId, status: run.status })),
   };
 }

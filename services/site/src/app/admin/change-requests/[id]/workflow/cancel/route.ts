@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import {
   cancelRuntimeJob,
   cancelActiveAgentRunsForRequest,
+  cancelWorkflowScriptRuns,
   createAgentMessage,
   createAgentSession,
   createWorkflowEvent,
@@ -115,6 +116,7 @@ export async function POST(request: Request, context: RouteContext) {
     requestId: changeRequest.id,
     reason: operatorNote,
   })
+  if (workflowRun) cancelWorkflowScriptRuns(workflowRun.id)
   wakeWorkflowAgentRunDispatcher()
   const canceledAgentRunsWithRuntime = await Promise.all(canceledAgentRuns.map(async (run) => {
     const runtimeJobId = resultString(run.result, "runtimeJobId")

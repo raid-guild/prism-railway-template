@@ -14,6 +14,7 @@ import {
   getWorkflowRunForRequest,
   listAgentMessages,
   listAgentRuns,
+  listWorkflowScriptRuns,
   listChangeRequestExecutions,
   listRequestArtifacts,
   listRequestExternalRefs,
@@ -134,6 +135,7 @@ export async function GET(request: Request, context: RouteContext) {
   const workflowRun = getWorkflowRunForRequest(changeRequest.id)
   const legacyExecutions = listChangeRequestExecutions(changeRequest.id)
   const agentRuns = listAgentRuns({ requestId: changeRequest.id, limit: 100 })
+  const scriptRuns = listWorkflowScriptRuns(changeRequest.id, 100)
   const agentRunsWithProfiles = agentRuns.map((run) => {
     const profile = run.agentProfileId ? getAgentProfileById(run.agentProfileId) : null
     return {
@@ -179,6 +181,7 @@ export async function GET(request: Request, context: RouteContext) {
     legacyExecutions,
     executions: legacyExecutions,
     agentRuns: agentRunsWithProfiles,
+    scriptRuns,
     workflowEvents,
     artifacts,
     externalRefs,

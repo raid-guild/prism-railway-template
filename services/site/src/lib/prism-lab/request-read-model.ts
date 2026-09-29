@@ -129,8 +129,8 @@ export function labRequestAllowedActions(input: {
     invokeCurrentStep: decision(
       capabilities,
       "canRunAgent",
-      runnable && ["agent", "checkpoint", "loop"].includes(phase.type),
-      !["agent", "checkpoint", "loop"].includes(phase.type)
+      runnable && ["agent", "checkpoint", "loop", "script"].includes(phase.type),
+      !["agent", "checkpoint", "loop", "script"].includes(phase.type)
         ? "Current step is not agent-runnable"
         : unavailableReason,
     ),
@@ -184,9 +184,15 @@ export function buildLabRequestListItems(
   capabilities: readonly Capability[],
 ): LabRequestListItem[] {
   const workflows = new Map((data.workflows ?? []).map((workflow) => [workflow.key, workflow]));
-  const activeRunsByRequestId = new Map<string, NonNullable<AdminBoardData["activeRequestAgentRuns"]>>();
+  const activeRunsByRequestId = new Map<string, Array<{ status: string }>>();
   for (const run of data.activeRequestAgentRuns ?? []) {
     if (!run.requestId || !["queued", "claimed", "running"].includes(run.status.toLocaleLowerCase())) continue;
+    const runs = activeRunsByRequestId.get(run.requestId) ?? [];
+    runs.push(run);
+    activeRunsByRequestId.set(run.requestId, runs);
+  }
+  for (const run of data.activeRequestScriptRuns ?? []) {
+    if (!run.requestId || !["queued", "running", "canceling", "completing"].includes(run.status.toLocaleLowerCase())) continue;
     const runs = activeRunsByRequestId.get(run.requestId) ?? [];
     runs.push(run);
     activeRunsByRequestId.set(run.requestId, runs);
@@ -197,7 +203,7 @@ export function buildLabRequestListItems(
     const status = request.workflowRunStatus?.trim().toLocaleLowerCase() || null;
     const workflowActive = status === "active" || status === "queued" || status === "running";
     const activeRuns = activeRunsByRequestId.get(request.id) ?? [];
-    const activeStatus = ["running", "claimed", "queued"].find((candidate) =>
+    const activeStatus = ["running", "claimed", "canceling", "completing", "queued"].find((candidate) =>
       activeRuns.some((run) => run.status.toLocaleLowerCase() === candidate),
     ) ?? null;
     const active = activeRuns.length > 0;

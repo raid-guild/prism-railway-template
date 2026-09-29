@@ -3,6 +3,7 @@ import { ScriptFailure, redactDiagnostic } from "./script-failure.js";
 import { ScriptHandoffFailure } from "./script-agent-handoff.js";
 import { doctorMergeSkills } from "./prism-doctor-skills.js";
 import { findOpenWorkflowRequests } from './workflow-single-flight.js';
+import { executePureWorkflowScript } from './workflow-script-executor.js';
 import { CronExpressionParser } from "cron-parser";
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
@@ -1566,6 +1567,26 @@ function doctorWorkflowFindings(workflow: Record<string, unknown>): DoctorFindin
       continue;
     }
 
+    if (type === "script") {
+      const config = isRecord(step.scriptConfig) ? step.scriptConfig : {};
+      const fallback = typeof config.fallbackStepKey === "string" ? config.fallbackStepKey : "";
+      const fallbackStep = workflowStepByKey(steps, fallback);
+      if (!config.revisionId || !/^sha256:[a-f0-9]{64}$/.test(String(config.checksum ?? "")) ||
+          config.contractVersion !== 1 || config.effectClass !== "pure" ||
+          !["request-snapshot-v1", "workflow-health-snapshot-v1"].includes(String(config.inputBinding ?? "")) ||
+          !fallbackStep || workflowStepType(fallbackStep) !== "agent") {
+        findings.push({
+          check: "script-revision-and-fallback-contract",
+          status: "failed", subjectType: "workflow", subjectKey: workflowKey, stepKey,
+          expected: "Script pins a full revision/checksum, a supported pure input contract, and an agent fallback.",
+          observed: "Script configuration is incomplete or unsupported.",
+          recommendation: "Create an immutable reviewed revision and configure a valid agent fallback before enabling this workflow.",
+          evidence: { revisionId: config.revisionId ?? null, checksum: config.checksum ?? null,
+            inputBinding: config.inputBinding ?? null, effectClass: config.effectClass ?? null, fallbackStepKey: fallback },
+        });
+      }
+    }
+
     if (!next) {
       findings.push({
         check: "step-has-forward-next",
@@ -2716,6 +2737,9 @@ async function schedulerLoop(tasks: RunnableTask[], builtInTasks: BuiltInTask[],
     if (!parseBoolEnv("TASK_RUNNER_DISABLED", false)) {
       await ensureTasksRegisteredWithSite(builtInTasks);
       await syncTasksFromSite(tasks);
+      void dispatchWorkflowScriptAttempt().catch((error) => {
+        console.warn(JSON.stringify({ event: "workflow_script.dispatch_failed", error: describeError(error) }));
+      });
       const now = new Date();
       for (const task of tasks) {
         const taskState = state.get(task.key);
@@ -2733,6 +2757,50 @@ async function schedulerLoop(tasks: RunnableTask[], builtInTasks: BuiltInTask[],
     }
     await sleep(pollSeconds * 1000);
   }
+}
+
+let workflowScriptDispatching = false;
+async function dispatchWorkflowScriptAttempt(): Promise<void> {
+  if (workflowScriptDispatching || !appApiBaseUrl()) return;
+  workflowScriptDispatching = true;
+  try {
+    const response = await appApiRequest('/agent/workflow-scripts/claim', { method: 'POST', body: '{}' });
+    const run = response?.run;
+    const revision = response?.revision;
+    if (!isRecord(run) || !isRecord(revision)) return;
+    const id = typeof run.id === 'string' ? run.id : '';
+    const token = typeof run.leaseToken === 'string' ? run.leaseToken : '';
+    const source = typeof revision.source === 'string' ? revision.source : '';
+    if (!id || !token || !source || revision.id !== run.revisionId || revision.checksum !== run.checksum ||
+        revision.effectClass !== 'pure' || revision.runtime !== 'node-esm' || !isRecord(run.input)) {
+      throw new Error('WORKFLOW_SCRIPT_CLAIM_INVALID');
+    }
+    const controller = new AbortController();
+    const renew = setInterval(() => {
+      void appApiRequest(`/agent/workflow-scripts/${encodeURIComponent(id)}/lease`, {
+        method: 'POST', body: JSON.stringify({ leaseToken: token }),
+      }).catch(() => controller.abort());
+    }, 20_000);
+    renew.unref();
+    try {
+      const result = await executePureWorkflowScript({
+        source, checksum: String(run.checksum), snapshot: run.input,
+        inputChecksum: String(run.inputChecksum),
+        timeoutMs: Math.min(30_000, Math.max(1_000, Number(isRecord(run.config) ? run.config.timeoutMs : 30_000) || 30_000)),
+        outputMaxBytes: Math.min(262_144, Math.max(1_024, Number(isRecord(run.config) ? run.config.outputMaxBytes : 262_144) || 262_144)),
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) {
+        await appApiRequest(`/agent/workflow-scripts/${encodeURIComponent(id)}/cancel-ack`, {
+          method: 'POST', body: JSON.stringify({ leaseToken: token }),
+        }).catch(() => undefined);
+        return;
+      }
+      await appApiRequest(`/agent/workflow-scripts/${encodeURIComponent(id)}/complete`, {
+        method: 'POST', body: JSON.stringify({ leaseToken: token, ...result }),
+      });
+    } finally { clearInterval(renew); }
+  } finally { workflowScriptDispatching = false; }
 }
 
 async function main(): Promise<void> {

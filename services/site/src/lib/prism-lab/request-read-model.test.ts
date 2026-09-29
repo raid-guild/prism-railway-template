@@ -115,6 +115,16 @@ test("read model derives active runs, phase, estimates, and capability actions",
   assert.match(item.allowedActions.invokeCurrentStep.reason ?? "", /active/);
 });
 
+test("request-owned script attempts appear as active work and prevent duplicate invocation", () => {
+  const data = board([request()]);
+  data.activeRequestScriptRuns = [{ id: "script-1", requestId: "request-1", status: "running" }];
+  const [item] = buildLabRequestListItems(data, ["canViewRequests", "canRunAgent"]);
+  assert.equal(item.lifecycle, "running");
+  assert.equal(item.run.activeCount, 1);
+  assert.equal(item.run.status, "running");
+  assert.equal(item.allowedActions.invokeCurrentStep.allowed, false);
+});
+
 test("human gate actions require canRunAgent and a clear, inactive gate", () => {
   const gated = request({ currentWorkflowStepKey: "approve", workflowRunStatus: "active" });
   const [active] = buildLabRequestListItems(board([gated]), ["canViewRequests", "canRunAgent"]);

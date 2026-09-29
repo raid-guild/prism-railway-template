@@ -25,6 +25,7 @@ import {
   getWorkflowRunForRequest,
   listAgentRuns,
   listActiveAgentRunsForRequest,
+  activeWorkflowScriptRun,
   listAgentMessages,
   listRequestExternalRefs,
   loadConfig,
@@ -166,7 +167,9 @@ function parseResponseInputMessages(input: unknown) {
 }
 
 function hasActiveAgentRun(changeRequestId: string, excludeAgentRunId?: string | null) {
-  return listActiveAgentRunsForRequest(changeRequestId).some((run) => run.id !== excludeAgentRunId)
+  const workflowRun = getWorkflowRunForRequest(changeRequestId)
+  return (workflowRun ? Boolean(activeWorkflowScriptRun(workflowRun.id)) : false) ||
+    listActiveAgentRunsForRequest(changeRequestId).some((run) => run.id !== excludeAgentRunId)
 }
 
 function isStoppedAgentRunStatus(status: string | null | undefined) {

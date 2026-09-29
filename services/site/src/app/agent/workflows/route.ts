@@ -6,6 +6,7 @@ import { assignAccountabilityDomain, getAccountabilityAssignment, listWorkflows,
 import { requireServiceAccess } from "@/lib/internal-service";
 import { validateWorkflowContextPolicies } from "@/lib/workflow-context-policy";
 import { modelTierFromAgentConfig } from "@/lib/model-tier";
+import { validateWorkflowScriptSteps } from "@/lib/workflow-script-validation";
 
 export async function GET() {
   const access = await requireWorkflowWriteAccess();
@@ -213,6 +214,10 @@ export async function POST(request: Request) {
   const contextPolicyError = validateWorkflowContextPolicies(manifest);
   if (contextPolicyError) {
     return NextResponse.json({ ok: false, error: contextPolicyError }, { status: 400 });
+  }
+  const scriptStepError = validateWorkflowScriptSteps(manifest);
+  if (scriptStepError) {
+    return NextResponse.json({ ok: false, error: scriptStepError }, { status: 400 });
   }
   try {
     modelTierFromAgentConfig(manifest.agentConfig ?? manifest.agent_config);
